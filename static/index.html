@@ -18,6 +18,10 @@
 
     <link rel="stylesheet" href="leaflet-extra-markers/css/leaflet.extra-markers.min.css">
 
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@600;700&display=swap" rel="stylesheet">
+
     <script crossorigin=""
             integrity="sha512-gZwIG9x3wUXg2hdXF6+rVkLF/0Vi9U8D2Ntg4Ga5I5BZpVkVxlJWbSQtXPSiUTtC0TjtGOmxa1AJPuV0CPthew=="
             src="https://unpkg.com/leaflet@1.6.0/dist/leaflet.js"></script>
@@ -40,8 +44,81 @@
     <script src="index.js"></script>
 
     <style>
+        :root {
+            --bg: #EEF1EA;
+            --surface: #FFFFFF;
+            --surface-2: #F6F8F2;
+            --ink: #1D2B27;
+            --ink-muted: #5E6B64;
+            --line: #DADFD3;
+            --accent: #1F6F72;
+            --accent-ink: #FFFFFF;
+            --accent-soft: #DCEDEA;
+            --danger: #B33F32;
+            --shadow: 0 1px 2px rgba(29,43,39,0.06), 0 4px 14px rgba(29,43,39,0.06);
+        }
+
         html, body, .pmap {
             height: 100%;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--ink);
+        }
+
+        .card-header h3, .btn, .btn-group-toggle .btn {
+            font-family: "Archivo Narrow", "Arial Narrow", sans-serif;
+            font-weight: 700;
+            letter-spacing: 0.01em;
+        }
+
+        a { color: var(--accent); }
+        a:hover { color: var(--accent); text-decoration: underline; }
+
+        .btn-primary, .btn-primary:hover, .btn-primary:focus,
+        .btn-primary:not(:disabled):not(.disabled):active {
+            background-color: var(--accent);
+            border-color: var(--accent);
+            box-shadow: none;
+        }
+        .btn-outline-primary {
+            color: var(--accent);
+            border-color: var(--accent);
+        }
+        .btn-outline-primary:hover, .btn-outline-primary.active,
+        .btn-outline-primary:not(:disabled):not(.disabled):active {
+            background-color: var(--accent);
+            border-color: var(--accent);
+            color: var(--accent-ink);
+        }
+        .btn.focus, .btn:focus,
+        .form-control:focus, .custom-select:focus {
+            box-shadow: 0 0 0 0.2rem var(--accent-soft);
+            border-color: var(--accent);
+        }
+        .custom-control-input:checked ~ .custom-control-label::before {
+            border-color: var(--accent);
+            background-color: var(--accent);
+        }
+        .spinner-border.text-primary { color: var(--accent) !important; }
+
+        .form-control, .custom-select {
+            background-color: var(--surface-2);
+            border-color: var(--line);
+            color: var(--ink);
+        }
+
+        .card {
+            border-radius: 12px;
+            border-color: var(--line);
+            box-shadow: var(--shadow);
+            background: var(--surface);
+        }
+        .card-header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--line);
+            border-radius: 12px 12px 0 0 !important;
         }
 
         #mapid {
@@ -91,20 +168,20 @@
             padding: 0.9rem;
         }
 
-        #actionBar {
-            position: sticky;
-            bottom: 0;
-            background: #fff;
-            border-top: 1px solid #dee2e6;
-            padding: 10px 0 4px;
-            margin-top: 4px;
-            z-index: 10;
-        }
         #run-button-group {
             width: 100%;
         }
         #run-button-group > .btn {
             flex: 1 1 0;
+        }
+        .progress-bar {
+            background-color: var(--accent);
+        }
+
+        #mapLegend {
+            border-radius: 10px 10px 0 0 !important;
+            box-shadow: var(--shadow);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         }
 
     </style>
@@ -271,16 +348,21 @@
                         <label for="budgetKm">Ziel-Streckenlänge (km)</label>
                         <input class="form-control" id="budgetKm" min="1" type="number" value="30">
                     </div>
-                </div>
-            </div>
 
-            <!-- Status -->
-            <div class="card mb-3">
-                <div class="card-header py-2">
-                    <h3 aria-expanded="true" data-target="#card-status" data-toggle="collapse">Status</h3>
-                </div>
-                <div class="collapse show card-body" id="card-status">
-                    <div class="alert alert-light" id="progress-message">
+                    <div aria-label="Route actions" class="btn-group mt-3" id="run-button-group" role="group">
+                        <button class="btn btn-outline-secondary" id="clear-tiles"
+                                type="button"><span data-i18n="message-clear-tiles-button">Clear tiles</span>
+                            & <i class="fas fa-map-marker-alt"></i>
+                        </button>
+                        <button class="btn btn-primary" id="bPlanRoute" type="button">Route planen</button>
+                        <button class="btn btn-outline-danger" disabled id="bAbortRoute" type="button">Abbrechen</button>
+                    </div>
+
+                    <div class="progress mt-3" style="height:8px;">
+                        <div class="progress-bar" id="routeProgressBar" role="progressbar" style="width:0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                    </div>
+
+                    <div class="alert alert-light mt-2" id="progress-message">
                         <button class="btn btn-primary" id="button-download-route">
                             <i class="fas fa-cloud-download-alt"></i>
                         </button>
@@ -365,18 +447,6 @@
 
                     <div class="list-group" id="traces-list">
                     </div>
-                </div>
-            </div>
-
-            <!-- STICKY ACTION BAR - Kacheln leeren / Route planen / Abbrechen, always visible -->
-            <div id="actionBar">
-                <div aria-label="Route actions" class="btn-group" id="run-button-group" role="group">
-                    <button class="btn btn-warning" id="clear-tiles"
-                            type="button"><span data-i18n="message-clear-tiles-button">Clear tiles</span>
-                        & <i class="fas fa-map-marker-alt"></i>
-                    </button>
-                    <button class="btn btn-success" id="bPlanRoute" type="button">Route planen</button>
-                    <button class="btn btn-danger" disabled id="bAbortRoute" type="button">Abbrechen</button>
                 </div>
             </div>
         </div>

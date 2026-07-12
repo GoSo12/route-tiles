@@ -13,6 +13,19 @@ Laufendes Änderungsprotokoll für dieses Projekt (Fork von [route-tiles](https:
 - **Kleine Ergänzung:** Im Manuell-Modus zeigt `#selectedTileCount` jetzt die Anzahl aktuell ausgewählter Kacheln an (aktualisiert bei Kachel-Klick, "Kacheln leeren", Schotter-Dialog "Kachel entfernen" und beim Laden aus `localStorage`).
 - **Verifiziert:** lokaler Server + Playwright (headless Chromium) – alle fünf Panels rendern und lassen sich unabhängig ein-/ausklappen, Segmented Control schaltet `#manualModeControls`/`#budgetModeControls` korrekt um, Aktionsleiste bleibt beim Scrollen sichtbar, keine JavaScript-Fehler in der Konsole.
 
+### Nachtrag: optisch entsprach die erste Umsetzung nicht dem Mockup
+
+- **Rückmeldung:** die erste Umsetzung übernahm nur die *Struktur* des Mockups (Panels/Segmented Control/Sticky Bar), nicht dessen *Optik* – Farben/Formen/Typografie blieben unverändertes Bootstrap-Blau/-Grau.
+- **Nachgezogen:** Farbsystem als CSS-Variablen (`--bg`, `--surface`, `--ink`, `--accent` (Petrol/Teal `#1F6F72`) etc., 1:1 aus dem Mockup übernommen) über gezielte Bootstrap-Overrides gelegt – `.btn-primary`/`.btn-outline-primary` (inkl. dessen aktivem Zustand, trifft damit auch den Segmented Control), Fokus-Ringe, Checkbox/Switch-Akzentfarbe, `.card`/`.card-header` (abgerundete Ecken, Schatten, keine graue Kopfleiste mehr), Eingabefelder. Panel-Titel und Buttons nutzen jetzt die im Mockup verwendete Schriftart "Archivo Narrow" (Google Fonts, per `<link>` nachgeladen). Die Aktionsleisten-Buttons entsprechen jetzt dem Mockup: "Kacheln leeren" outline, "Route planen" gefüllt in Akzentfarbe, "Abbrechen" outline-danger (vorher warning/success/danger-Vollflächen).
+- **Verifiziert:** erneuter Playwright-Screenshot gegen den echten Server zeigt die Akzentfarbe korrekt auf Buttons/Segmented Control/Cards angewendet, keine JavaScript-Fehler.
+
+### Nachtrag: Aktionsleiste, Status und Fortschrittsbalken in "Ziel: Kacheln wählen" zusammengeführt
+
+- **Anforderung:** "Kacheln leeren"/"Route planen"/"Abbrechen" sowie das komplette Status-Panel (Fortschritt, Länge, GPX-Download) sollen nicht mehr eigenständig (Sticky-Bar bzw. eigenes "Status"-Panel) stehen, sondern Teil des Panels "Ziel: Kacheln wählen" sein – dort, wo Kacheln/Budget gewählt werden, direkt weiter zu Planen/Status.
+- **Umsetzung:** die Sticky-Action-Bar (`#actionBar`) und das eigenständige `#card-status`-Panel entfallen; `#run-button-group`, `#progress-message`, `#gpxMessage` und `#gpxDownload` sind jetzt Teil von `#card-target`.
+- **Neu (bisher ungenutzter Server-Wert):** ein echter Fortschrittsbalken (Bootstrap `.progress`/`.progress-bar`, `#routeProgressBar`) – der Server liefert in `/route_status` seit Längerem ein `progress`-Feld (0–100, siehe `route-tiles-server.py`/`tilesrouter.py`), das das Frontend bisher komplett ignorierte und nur den Spinner+Text anzeigte. `index.js` aktualisiert die Balkenbreite jetzt bei jedem Poll und setzt sie beim Start einer neuen Suche sowie bei Abbruch/Fehler auf 0 zurück.
+- **Verifiziert:** Playwright gegen den echten Server – alle Elemente liegen im DOM an der neuen Stelle (`#card-status`/`#actionBar` existieren nicht mehr), keine JavaScript-Fehler; Fortschrittsbalken testweise auf 45% gesetzt und Darstellung geprüft.
+
 ## Fix: Browser-Cache konnte alte index.html/index.js ausliefern
 
 - **Symptom:** Nutzer meldete, dass bereits behobene Bugs (automatischer Routenstart im manuellen Modus, fehlende Buttons im Streckenvorgabe-Modus) weiterhin auftraten. Serverseitiger Abgleich (`curl` gegen `/index.html`/`/index.js`) zeigte, dass der Server exakt den aktuellen, korrekten Stand ausliefert (byte-identisch zur Datei auf der Festplatte) – der Fehler lag also nicht mehr im Code, sondern vermutlich an einer vom Browser gecachten alten Version dieser beiden Dateien (werden ohne Cache-Busting-Dateinamen/-Query ausgeliefert).

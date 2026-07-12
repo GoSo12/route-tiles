@@ -2,13 +2,17 @@
 
 Offene Punkte, geordnet nach Themenblock. Erledigtes wird nach `UPDATES.md` verschoben, nicht hier gestrichen liegen gelassen.
 
-## 1. Komplettes Durchtesten des Codes
+## 1. GUI-Anordnung überdenken
+
+Die aktuelle Panel-Anordnung (Kartendaten / Fortbewegung & Route / Ziel: Kacheln wählen inkl. Aktionen+Status+Fortschritt / Gespeicherte Routen) mehrfach iteriert, aber noch nicht als endgültig befunden – nochmal grundsätzlich überdenken, ob Gruppierung/Reihenfolge/Aufteilung so sinnvoll ist oder anders geschnitten werden sollte.
+
+## 2. Komplettes Durchtesten des Codes
 
 Systematischer Test-Durchgang über den gesamten Code (nicht nur Einzelfall-Stichproben wie bisher): alle Fahrmodi, alle Solver-Pfade (exakt/OR-Tools/Orienteering), Schotter-Freigabe, Sackgassen-Bereinigung, Scoring-Funktionen, Statshunters-Import – idealerweise mit einer nachvollziehbaren Sammlung von Testfällen/Regressionstests statt Ad-hoc-`curl`-Aufrufen wie bisher in der Session.
 
 - ✅ Erledigt: `/abort_route` gegen eine länger laufende OR-Tools-Berechnung (20 Kacheln) getestet. Dabei einen echten Bug gefunden und behoben (fehlende `self._exit`-Prüfung nach `solve_tile_route()` – Abbruch wurde ignoriert, Route lief immer zu Ende), siehe `UPDATES.md`. Noch offen: derselbe End-to-End-Test für den Orienteering-Pfad (`/start_orienteering`) steht noch aus (dafür wird eine echte Statshunters-URL benötigt, ein leerer Testaufruf schlägt fehl).
 
-## 2. Modernisierungs-Audit (Abgleich mit den ursprünglichen Empfehlungen vom Sitzungsbeginn)
+## 3. Modernisierungs-Audit (Abgleich mit den ursprünglichen Empfehlungen vom Sitzungsbeginn)
 
 Zu Beginn dieses Projekts wurden folgende Technologien empfohlen – Status:
 

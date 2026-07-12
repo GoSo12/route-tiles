@@ -287,6 +287,11 @@ $(document).ready(function(){
         var sessionId = false;
         var state = false;
 
+        function updateProgressBar(pct) {
+            pct = Math.max(0, Math.min(100, pct || 0));
+            $('#routeProgressBar').css('width', pct + '%').attr('aria-valuenow', pct);
+        }
+
         function setMessageAlert(level) {
             $("#progress-message").removeClass(function(index, className){
                 return (className.match(/(^|\s)alert-\S+/g)||[]).join('')
@@ -301,6 +306,7 @@ $(document).ready(function(){
                 success: function ( data ) {
                     if (data['status']=="OK") {
                         state = data['state']
+                        updateProgressBar(data['progress']);
                         $("#message").text($.i18n("message-state-"+data['state']));
                         if ('route' in data) {
                             routeId = data['findRouteId']
@@ -337,6 +343,7 @@ $(document).ready(function(){
                             set_planning_buttons(false);
                         }
                     } else {
+                        updateProgressBar(0);
                         $("#message").text($.i18n("message-state-fail")+":"+$.i18n("msg-error_"+data['error_code']));
                         setMessageAlert('danger');
                         $("#length").text("");
@@ -538,6 +545,7 @@ $(document).ready(function(){
             $("#message").text($.i18n("message-state-wait"));
             $("#length").text("");
             $("#spinner-searching").show();
+            updateProgressBar(0);
 
             if ($('input[name="routingMode"]:checked').val() === 'budget') {
                 let data = {
@@ -580,6 +588,7 @@ $(document).ready(function(){
                     $("#spinner-searching").hide();
                     setMessageAlert('info');
                     $("#message").text("Abgebrochen");
+                    updateProgressBar(0);
                     set_planning_buttons(false);
                 }
             });
