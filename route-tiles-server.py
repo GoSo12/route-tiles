@@ -18,6 +18,7 @@ from urllib import parse
 from tilesrouter import RouteServer, latlons_to_gpx
 from tile import tiles_to_kml
 from statshunters import get_statshunters_activities, tiles_from_activities, compute_max_square, compute_cluster, statshunters_path
+from scoring import score_cluster_candidates, find_best_square_completion
 
 
 PORT = 8000
@@ -65,6 +66,15 @@ class RouteHttpServer(http.server.SimpleHTTPRequestHandler):
         super().__init__(*args, **kwargs)
         self.session = None
         self.sessionId = None
+
+    def end_headers(self):
+        # Dev server under active iteration: index.html/index.js change
+        # often and are served without cache-busting filenames, so a stale
+        # browser cache of them is a recurring source of "my fix isn't
+        # showing up" confusion. Disabling caching outright costs nothing
+        # here (purely local, low-traffic tool).
+        self.send_header('Cache-Control', 'no-store')
+        super().end_headers()
 
     def do_GET_request(self):
         parsed_path = parse.urlparse(self.path)
@@ -144,6 +154,24 @@ class RouteHttpServer(http.server.SimpleHTTPRequestHandler):
                                      'maxSquare': kml_max_square,
                                      'cluster': kml_cluster}).encode('utf-8'))
 
+    def do_GET_scoring(self):
+        parsed_path = parse.urlparse(self.path)
+        qs = parse.parse_qs(parsed_path.query, keep_blank_values=True)
+        url = qs['url'][0]
+        if 'filter' in qs:
+            sh_filter = qs['filter'][0]
+        else:
+            sh_filter = None
+
+        data_folder = Path(__file__).parent.joinpath('data')
+        folder = statshunters_path(url, data_folder)
+
+        tiles = tiles_from_activities(folder, filter_str=sh_filter)
+
+        self.wfile.write(json.dumps({'status': 'OK',
+                                     'clusterScores': score_cluster_candidates(tiles),
+                                     'maxSquareCompletion': find_best_square_completion(tiles)}).encode('utf-8'))
+
     def do_GET_start_route(self):
         parsed_path = parse.urlparse(self.path)
         qs = parse.parse_qs(parsed_path.query, keep_blank_values=True)
@@ -151,7 +179,7 @@ class RouteHttpServer(http.server.SimpleHTTPRequestHandler):
         start = [float(qs['start[]'][0]), float(qs['start[]'][1])]
         end = [float(qs['end[]'][0]), float(qs['end[]'][1])]
         mode = qs['mode'][0]
-        turnaround_cost = float(qs['turnaroundCost'][0])
+        turnaround_cost = float(qs.get('turnaroundCost', ['0'])[0])
         if 'tiles[]' in qs:
             tiles = qs['tiles[]']
             for i in range(len(tiles)):
@@ -168,9 +196,11 @@ class RouteHttpServer(http.server.SimpleHTTPRequestHandler):
                 wpi += 1
             pprint(waypoints)
 
+        gravel_tiles = qs.get('gravelTiles[]', [])
+
         answer = {'sessionId': self.sessionId}
 
-        router, message, info = self.session.routeServer.start_route(mode, start, end, tiles, waypoints=waypoints, config={'turnaround_cost':turnaround_cost})
+        router, message, info = self.session.routeServer.start_route(mode, start, end, tiles, waypoints=waypoints, config={'turnaround_cost':turnaround_cost}, gravel_tiles=gravel_tiles)
 
         if router:
             answer['status'] = "OK"
@@ -193,6 +223,29 @@ class RouteHttpServer(http.server.SimpleHTTPRequestHandler):
 
         self.wfile.write(json.dumps(answer).encode('utf-8'))
 
+    def do_GET_start_orienteering(self):
+        parsed_path = parse.urlparse(self.path)
+        qs = parse.parse_qs(parsed_path.query, keep_blank_values=True)
+        pprint(qs)
+        start = [float(qs['start[]'][0]), float(qs['start[]'][1])]
+        budget_km = float(qs['budgetKm'][0])
+        mode = qs['mode'][0]
+        url = qs['url'][0]
+        sh_filter = qs['filter'][0] if 'filter' in qs else None
+
+        data_folder = Path(__file__).parent.joinpath('data')
+        folder = statshunters_path(url, data_folder)
+        visited_tiles = tiles_from_activities(folder, filter_str=sh_filter)
+
+        answer = {'sessionId': self.sessionId}
+
+        router, _, _ = self.session.routeServer.start_orienteering(mode, start, budget_km, visited_tiles)
+
+        answer['status'] = "OK"
+        answer['state'] = 'complete' if self.session.routeServer.is_complete else 'searching'
+
+        self.wfile.write(json.dumps(answer).encode('utf-8'))
+
     def do_GET_route_status(self):
         parsed_path = parse.urlparse(self.path)
         qs = parse.parse_qs(parsed_path.query, keep_blank_values=True)
@@ -212,6 +265,9 @@ class RouteHttpServer(http.server.SimpleHTTPRequestHandler):
                     answer['findRouteId'] = crc
                     answer['length'] = route.length
                     answer['route'] = route.routeLatLons
+                    selected_tiles = getattr(self.session.routeServer.myRouter, 'selected_tiles', None)
+                    if selected_tiles is not None:
+                        answer['selectedTiles'] = selected_tiles
         else:
             answer['status'] = 'Fail'
             answer['error_code'] = self.session.routeServer.myRouter.error_code
@@ -220,6 +276,14 @@ class RouteHttpServer(http.server.SimpleHTTPRequestHandler):
 
         answer['sessionId'] = self.sessionId
         self.wfile.write(json.dumps(answer).encode('utf-8'))
+
+    def do_GET_abort_route(self):
+        # Note: for the OR-Tools-based solvers, this only takes effect at
+        # the next checkpoint (between tiles, or once the current blocking
+        # OR-Tools solve call returns) - it can't interrupt a solve already
+        # in progress mid-call.
+        self.session.routeServer.abort()
+        self.wfile.write(json.dumps({'status': 'OK', 'sessionId': self.sessionId}).encode('utf-8'))
 
     def do_GET_generate_gpx(self):
         parsed_path = parse.urlparse(self.path)
@@ -380,6 +444,7 @@ def route_tiles_server(port):
     Path(__file__).parent.joinpath('static', 'gpx').mkdir(exist_ok=True)
     Path(__file__).parent.joinpath('debug').mkdir(exist_ok=True)
     handler_class = partial(RouteHttpServer, directory=str(Path(__file__).parent.joinpath('static')))
+    socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer(("", port), handler_class) as httpd:
         print("serving at port", port)
         httpd.serve_forever()

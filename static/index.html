@@ -46,6 +46,7 @@
 
         #mapid {
             height: 100%;
+            position: relative;
         }
 
         label.custom-file-label {
@@ -85,6 +86,16 @@
     <div class="row pmap">
         <div class="col-md-8 pmap">
             <div id="mapid">
+                <div id="mapLegend" style="position: absolute; bottom: 0; left: 0; right: 0; z-index: 1000; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 14px; padding: 6px 10px; font-size: 0.8em; background: rgba(255,255,255,0.9); border-top: 1px solid #ccc;">
+                    <span><span style="display:inline-block;width:11px;height:11px;background:green;opacity:0.6;vertical-align:middle;"></span> Besucht</span>
+                    <span><span style="display:inline-block;width:11px;height:11px;border:1px solid red;vertical-align:middle;"></span> Nicht besucht</span>
+                    <span><span style="display:inline-block;width:11px;height:11px;background:orange;vertical-align:middle;"></span> Cluster-Potenzial</span>
+                    <span><span style="display:inline-block;width:11px;height:11px;background:purple;vertical-align:middle;"></span> Max-Square-Ziel</span>
+                    <span><span style="display:inline-block;width:11px;height:11px;background:saddlebrown;vertical-align:middle;"></span> Schotter akzeptiert</span>
+                    <span><span style="display:inline-block;width:14px;height:2px;background:red;vertical-align:middle;"></span> Berechnete Route</span>
+                    <span><span style="display:inline-block;width:14px;height:2px;background:#20ff20;vertical-align:middle;"></span> Cluster-Umriss</span>
+                    <span><span style="display:inline-block;width:14px;height:2px;background:#2020FF;vertical-align:middle;"></span> Max-Square-Umriss</span>
+                </div>
             </div>
         </div>
         <div class="col-md-4 pmap" style="overflow-y:auto">
@@ -104,6 +115,7 @@
                     <label for="mode-selection" class="col-sm-8 col-form-label" data-i18n="msg-config-mode"></label>
                     <select id="mode-selection" class="col-sm-4 form-control config-storage request-route" >
                         <option data-i18n="message-mode-roadcycle" data-value="roadcycle" href="#">Roadcycle</option>
+                        <option data-i18n="message-mode-gravelbike" data-value="gravelbike" href="#">Gravel bike</option>
                         <option data-i18n="message-mode-roadfoot" data-value="road_foot" href="#">Road foot</option>
                         <option data-i18n="message-mode-foot" data-value="foot" href="#">Foot</option>
                         <option data-i18n="message-mode-trail" data-value="trail" href="#">Trail</option>
@@ -164,12 +176,31 @@
                 <i class="fas fa-map-marker-alt"></i>
             </button>
 
-            <div aria-label="Clear tiles" class="btn-group" id="run-button-group" role="group">
+            <div class="form-group">
+                <label>Modus</label>
+                <div class="form-check form-check-inline">
+                    <input checked class="form-check-input" id="routingModeManual" name="routingMode" type="radio" value="manual">
+                    <label class="form-check-label" for="routingModeManual">Manuelle Kachelauswahl</label>
+                </div>
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" id="routingModeBudget" name="routingMode" type="radio" value="budget">
+                    <label class="form-check-label" for="routingModeBudget">Streckenvorgabe</label>
+                </div>
+            </div>
+
+            <div id="budgetModeControls" style="display:none;">
+                <label for="budgetKm">Ziel-Streckenlänge (km)</label>
+                <input class="form-control" id="budgetKm" min="1" type="number" value="30">
+            </div>
+
+            <div aria-label="Route actions" class="btn-group" id="run-button-group" role="group">
                 <!--<button type="button" class="btn btn-success" id="route">Chercher</button>-->
                 <button class="btn btn-warning" id="clear-tiles"
                         type="button"><span data-i18n="message-clear-tiles-button">Clear tiles</span>
                     & <i class="fas fa-map-marker-alt"></i>
                 </button>
+                <button class="btn btn-success" id="bPlanRoute" type="button">Route planen</button>
+                <button class="btn btn-danger" disabled id="bAbortRoute" type="button">Abbrechen</button>
                 <!--<button type="button" class="btn btn-info" id="export-tiles">Exporter les carrés en KML</button>-->
             </div>
             <a class="d-none btn btn-info" download href="" id="gpxDownload">Télécharger</a>
@@ -284,6 +315,10 @@
                 <input id="statshunters_filter" class="form-control config-storage" name="statshunters_filter" type="text"/>
 
                 <div class="form-check">
+                  <input class="form-check-input config-storage" type="checkbox" value="" id="showVisitedTiles" checked>
+                  <label class="form-check-label" for="showVisitedTiles">Show visited tiles</label>
+                </div>
+                <div class="form-check">
                   <input class="form-check-input config-storage" type="checkbox" value="" id="showMaxSquare">
                   <label class="form-check-label" for="showMaxSquare" data-i18n="msg-show-max-square">Show max square</label>
                 </div>
@@ -291,9 +326,37 @@
                   <input class="form-check-input config-storage" type="checkbox" value="" id="showCluster">
                   <label class="form-check-label" for="showCluster" data-i18n="msg-show-cluster">Show cluster</label>
                 </div>
+
+                <div class="form-group">
+                    <label for="tileScoreMode">Tile potential</label>
+                    <select class="form-control" id="tileScoreMode">
+                        <option value="none">None</option>
+                        <option value="maxSquare">Max square growth</option>
+                        <option value="cluster">Cluster growth</option>
+                    </select>
+                    <small id="maxSquareCompletionInfo" class="form-text text-muted"></small>
+                </div>
             </div>
         </div>
 
+    </div>
+</div>
+
+<div class="modal" id="gravelModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Kachel ohne befestigte Straße</h5>
+            </div>
+            <div class="modal-body">
+                <p id="gravelModalText"></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" id="gravelModalCancel">Abbrechen</button>
+                <button type="button" class="btn btn-outline-danger" id="gravelModalRemove">Kachel entfernen</button>
+                <button type="button" class="btn btn-primary" id="gravelModalAccept">Schotter zulassen</button>
+            </div>
+        </div>
     </div>
 </div>
 

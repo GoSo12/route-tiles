@@ -75,9 +75,10 @@ $(document).ready(function(){
                 this.selected = false;
                 this.highlighted = false;
                 this.iserror = false
+                this.baseOpacity = options.fillOpacity || 0;
             },
             update: function() {
-                let opacity = 0;
+                let opacity = this.baseOpacity;
                 let fill_color = this.options.color;
                 if (this.iserror) {
                     opacity = 0.7;
@@ -150,14 +151,20 @@ $(document).ready(function(){
         var visited_tiles = []
         var routes_visited_tiles = []
         var error_tiles = []
+        var gravel_tiles = []
+
+        var maxSquareCompletionTiles = []
+        var maxSquareCompletionInfo = false
+        var clusterScores = {}
+        var clusterScoresMax = 1
 
 
         function updateMapTiles(e) {
-            if (mymap.getZoom()<10) {
-                // Remove tiles
-                displayed_tiles.clear();
-                tilesLayerGroup.clearLayers();
-            } else {
+            // Tiles already drawn are left alone regardless of zoom - a
+            // brief zoom dip (trackpad pan misread as a wheel-zoom) must
+            // never wipe what is already on the map. Below zoom 10 we just
+            // stop adding new ones (perf guard for a fully zoomed-out view).
+            if (mymap.getZoom()>=10) {
                 // display tiles
                 let bounds = mymap.getBounds();
                 let t1 = TileFromCoord(bounds.getNorth(), bounds.getWest())
@@ -169,12 +176,44 @@ $(document).ready(function(){
                             let color = 'blue';
                             let weight = 0.1;
                             let opacity = 0;
-                            if (!visited_tiles.includes(tile_id)) {
+                            if (visited_tiles.includes(tile_id)) {
+                                if ($('#showVisitedTiles').is(':checked')) {
+                                    color = 'green';
+                                    weight = 0.3;
+                                    opacity = 0.25;
+                                }
+                            } else {
                                 color = 'red';
                                 weight = 1.0;
+                                let scoreMode = $('#tileScoreMode').val();
+                                if (scoreMode === 'maxSquare') {
+                                    if (maxSquareCompletionTiles.includes(tile_id)) {
+                                        color = 'purple';
+                                        weight = 1.0;
+                                        opacity = 0.6;
+                                    }
+                                } else if (scoreMode === 'cluster') {
+                                    let score = clusterScores[tile_id] || 0;
+                                    if (score > 0) {
+                                        color = 'orange';
+                                        weight = 0.5;
+                                        let ratio = Math.log(score + 1) / Math.log(clusterScoresMax + 1);
+                                        opacity = 0.15 + 0.65 * Math.min(ratio, 1);
+                                    }
+                                }
                             }
                             if (routes_visited_tiles.includes(tile_id)) {
                                 opacity = 0.3;
+                            }
+                            if (gravel_tiles.includes(tile_id)) {
+                                // Overrides everything else: once gravel is
+                                // accepted for a tile, it should stay clearly
+                                // marked regardless of the active overlay
+                                // mode, so the rider knows in advance where
+                                // the ride will hit unpaved surface.
+                                color = 'saddlebrown';
+                                weight = 1.5;
+                                opacity = 0.55;
                             }
                             let tile_rect = tile(boundsFromTile(x, y), {color: color, fillColor: color, fillOpacity:opacity, weight:weight, tile_id:tile_id}).addTo(tilesLayerGroup);
                             displayed_tiles.set(tile_id, tile_rect);
@@ -224,12 +263,9 @@ $(document).ready(function(){
             }
         });
 
-        L.tileLayer('https://api.mapbox.com/styles/v1/{id}/tiles/{z}/{x}/{y}?access_token=pk.eyJ1IjoibWFwYm94IiwiYSI6ImNpejY4NXVycTA2emYycXBndHRqcmZ3N3gifQ.rJcFIG214AriISLbB6B5aw', {
-            maxZoom: 18,
-            attribution: 'Map data &copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors, ' +
-                '<a href="https://creativecommons.org/licenses/by-sa/2.0/">CC-BY-SA</a>, ' +
-                'Imagery © <a href="https://www.mapbox.com/">Mapbox</a>',
-            id: 'mapbox/streets-v11'
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors'
         }).addTo(mymap);
 
         function latlonToStr(ll) {
@@ -269,6 +305,19 @@ $(document).ready(function(){
                                 routePolyline.setLatLngs(data.route).bringToFront();
                             }
                             $("#length").text(parseFloat(data['length']).toFixed(2)+" km");
+                            if ('selectedTiles' in data) {
+                                // Budget-planning mode: the solver picked
+                                // these tiles itself, highlight them the
+                                // same way a manually clicked tile would be.
+                                data.selectedTiles.forEach(function(tileId) {
+                                    if (!selected_tiles.includes(tileId)) {
+                                        selected_tiles.push(tileId);
+                                    }
+                                });
+                                displayed_tiles.clear();
+                                tilesLayerGroup.clearLayers();
+                                updateMapTiles();
+                            }
                         }
                         if (data['state']!='complete') {
                             timeoutID = window.setTimeout(route_status, 1000, ++active_timeout);
@@ -279,6 +328,7 @@ $(document).ready(function(){
                             timeoutID = false;
                             actualTrace =  {distance: data.length, route: data.route, polyline: routePolyline};
                             $('button#addTrace').prop("disabled", false);
+                            set_planning_buttons(false);
                         }
                     } else {
                         $("#message").text($.i18n("message-state-fail")+":"+$.i18n("msg-error_"+data['error_code']));
@@ -291,11 +341,59 @@ $(document).ready(function(){
                         }
                         $("#spinner-searching").hide();
                         timeoutID = false;
+                        set_planning_buttons(false);
+
+                        // ERR_NO_TILE_ENTRY_POINT: this tile has no road
+                        // reachable under the current mode's strict weights
+                        // (e.g. roadcycle excludes unpaved tracks). Ask via
+                        // #gravelModal - three explicit buttons instead of
+                        // nested confirm() dialogs, where "Cancel" meaning
+                        // "show me more options" was confusing.
+                        if (data['error_code'] == 1 && error_tiles.length > 0) {
+                            let tileId = error_tiles[0];
+                            if (!gravel_tiles.includes(tileId)) {
+                                $('#gravelModalText').text(
+                                    "Kachel " + tileId + " hat keine für den gewählten Modus " +
+                                    "befahrbare Straße. Wie möchtest du fortfahren?"
+                                );
+                                $('#gravelModal').data('tileId', tileId);
+                                $('#gravelModal').modal('show');
+                            }
+                        }
                     }
 
                 }
             });
         };
+
+        $('#gravelModalAccept').on('click', function() {
+            let tileId = $('#gravelModal').data('tileId');
+            gravel_tiles.push(tileId);
+            displayed_tiles.clear();
+            tilesLayerGroup.clearLayers();
+            updateMapTiles();
+            $('#gravelModal').modal('hide');
+            request_route();
+        });
+
+        $('#gravelModalRemove').on('click', function() {
+            let tileId = $('#gravelModal').data('tileId');
+            let idx = selected_tiles.indexOf(tileId);
+            if (idx !== -1) {
+                selected_tiles.splice(idx, 1);
+                localStorage.setItem("selected_tiles", JSON.stringify(selected_tiles));
+                let tile = displayed_tiles.get(tileId);
+                if (tile) {
+                    tile.select(0);
+                }
+            }
+            $('#gravelModal').modal('hide');
+            request_route();
+        });
+
+        $('#gravelModalCancel').on('click', function() {
+            $('#gravelModal').modal('hide');
+        });
 
         { // CONFIG-STORAGE
             $('select.config-storage').each(function(){
@@ -340,6 +438,11 @@ $(document).ready(function(){
 
         function start_route(timeout_id) {
             if (timeout_id != active_timeout) return;
+            // A request_route() call scheduled just before switching to
+            // budget mode can still fire after its 2s debounce delay -
+            // request_route() itself checks the mode, but that guard runs
+            // when scheduling, not when this actually executes.
+            if ($('input[name="routingMode"]:checked').val() === 'budget') return;
             $('button#addTrace').prop("disabled", true);
             actualTrace = false;
             setMessageAlert('info');
@@ -360,6 +463,7 @@ $(document).ready(function(){
                 data['waypoints'].push(latlonToQuery(wp.getLatLng()))
             });
             data['tiles'] = selected_tiles
+            data['gravelTiles'] = gravel_tiles
             data['mode'] = $('#mode-selection').find(':selected').data('value')
 
             $.getJSON({
@@ -389,22 +493,89 @@ $(document).ready(function(){
                 }
             });
         }
+        // Both modes (manual tile selection / distance-budget planning) use
+        // the exact same flow: clicking tiles, moving markers etc. only
+        // ever updates local state - nothing is sent to the server until
+        // the user explicitly clicks "Route planen". request_route() used
+        // to auto-schedule a search 2s after every such change; kept as a
+        // no-op so its many call sites don't need to change, but it no
+        // longer starts anything by itself.
         function request_route() {
-            console.log("Request_route")
-            console.log(selected_tiles);
-            if (timeoutID) {
-                window.clearTimeout(timeoutID);
-                timeoutID = false;
+        }
+
+        function set_planning_buttons(searching) {
+            $('#bPlanRoute').prop('disabled', searching);
+            $('#bAbortRoute').prop('disabled', !searching);
+        }
+
+        // Mode switch: manual tile selection vs. distance-budget planning.
+        // Only the budget-km field differs between them - "Clear tiles",
+        // "Route planen" and "Abbrechen" stay available in both.
+        $('input[name="routingMode"]').on("change", function() {
+            let budgetMode = $('input[name="routingMode"]:checked').val() === 'budget';
+            $('#budgetModeControls').toggle(budgetMode);
+        });
+
+        $('#bPlanRoute').on("click", function(e) {
+            e.preventDefault();
+            if (!('start' in markers)) {
+                alert("Bitte zuerst einen Startpunkt setzen.");
+                return;
             }
-            if (!('start' in markers)) return;
-            if (!('end' in markers) && selected_tiles.length==0 && waypoints.length==0) return;
+            set_planning_buttons(true);
+            $('button#addTrace').prop("disabled", true);
+            actualTrace = false;
             setMessageAlert('info');
             $("#button-download-route").hide();
             $("#message").text($.i18n("message-state-wait"));
             $("#length").text("");
+            $("#spinner-searching").show();
 
-            timeoutID = window.setTimeout(start_route, 2000, ++active_timeout);
-        }
+            if ($('input[name="routingMode"]:checked').val() === 'budget') {
+                let data = {
+                    'sessionId': sessionId,
+                    'start': latlonToQuery(markers['start'].getLatLng()),
+                    'budgetKm': $('#budgetKm').val(),
+                    'mode': $('#mode-selection').find(':selected').data('value'),
+                    'url': $("#statshunters_url").val(),
+                    'filter': $("#statshunters_filter").val()
+                };
+                $.getJSON({
+                    url: 'start_orienteering',
+                    data: data,
+                    success: function (data) {
+                        sessionId = data.sessionId;
+                        if (data['status'] == "OK") {
+                            route_status(++active_timeout);
+                        } else {
+                            setMessageAlert('danger');
+                            $("#message").text($.i18n("message-state-fail") + ":" + data['message']);
+                            set_planning_buttons(false);
+                        }
+                    }
+                });
+            } else {
+                start_route(++active_timeout);
+            }
+        });
+
+        $('#bAbortRoute').on("click", function(e) {
+            e.preventDefault();
+            if (timeoutID) {
+                window.clearTimeout(timeoutID);
+                timeoutID = false;
+            }
+            $.getJSON({
+                url: 'abort_route',
+                data: { 'sessionId': sessionId },
+                success: function () {
+                    $("#spinner-searching").hide();
+                    setMessageAlert('info');
+                    $("#message").text("Abgebrochen");
+                    set_planning_buttons(false);
+                }
+            });
+        });
 
         { // STATSHUNTERS
 
@@ -446,6 +617,7 @@ $(document).ready(function(){
                             if ($('#showMaxSquare').is(":checked")) {
                                 maxSquareLayer.addTo(mymap)
                             }
+                            load_tile_scores();
                         }
                         else {
                             alert(data.message);
@@ -453,6 +625,47 @@ $(document).ready(function(){
                     }
                 });
             }
+
+            function load_tile_scores() {
+                $.ajax({
+                    type: 'GET',
+                    url: 'scoring',
+                    data: {url: $("#statshunters_url").val(), filter:$("#statshunters_filter").val()},
+                    success: function ( data ) {
+                        if (data.status=="OK") {
+                            maxSquareCompletionInfo = data.maxSquareCompletion;
+                            maxSquareCompletionTiles = data.maxSquareCompletion.tiles;
+                            clusterScores = data.clusterScores;
+                            clusterScoresMax = Math.max(1, ...Object.values(clusterScores));
+                            if (maxSquareCompletionInfo.missingCount > 0) {
+                                $('#maxSquareCompletionInfo').text(
+                                    maxSquareCompletionInfo.missingCount + ' tiles needed for a '
+                                    + maxSquareCompletionInfo.size + 'x' + maxSquareCompletionInfo.size
+                                    + ' square (current: ' + (maxSquareCompletionInfo.size - maxSquareCompletionInfo.gain) + 'x'
+                                    + (maxSquareCompletionInfo.size - maxSquareCompletionInfo.gain) + ')'
+                                );
+                            } else {
+                                $('#maxSquareCompletionInfo').text('');
+                            }
+                            displayed_tiles.clear();
+                            tilesLayerGroup.clearLayers();
+                            updateMapTiles();
+                        }
+                    }
+                });
+            }
+
+            $('#tileScoreMode').on("change", function(e) {
+                displayed_tiles.clear();
+                tilesLayerGroup.clearLayers();
+                updateMapTiles();
+            });
+
+            $('#showVisitedTiles').on("change", function(e) {
+                displayed_tiles.clear();
+                tilesLayerGroup.clearLayers();
+                updateMapTiles();
+            });
 
             $( 'button#bImportStatsHunters' ).click(function ( e ) {
                 statshunters_request('statshunters');
@@ -575,6 +788,7 @@ $(document).ready(function(){
         });
         $("button#clear-tiles").on("click", function(e) {
             selected_tiles = [];
+            gravel_tiles = [];
             localStorage.setItem("selected_tiles", JSON.stringify(selected_tiles));
             updateMapTiles();
 
