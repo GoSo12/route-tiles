@@ -1,7 +1,7 @@
 import time
 from functools import wraps
 
-from numpy import math
+import math
 
 
 def distance(n1, n2):

@@ -8,7 +8,7 @@ import gpxpy
 import gpxpy.gpx
 from shapely.geometry import Point, Polygon
 
-from pyroutelib3 import Datastore
+from osmnx_datastore import OsmnxDatastore
 from tile import Tile, CoordDict
 from utils import *
 
@@ -35,9 +35,22 @@ def latlons_to_gpx(latlons, filename, name):
 class Route(object):
     def __init__(self, route, router):
         self.route = route
-        self.routeLatLons = list(map(router.node_lat_lon, route))
-        self.compute_length(self.routeLatLons)
+        self.routeLatLons = self._build_latlons(route, router)
         self.length = self.compute_length(self.routeLatLons)
+
+    @staticmethod
+    def _build_latlons(route, router):
+        """Insert the real road curve between consecutive nodes, where one
+        is known (osmnx's graph simplification merges shape points into a
+        single edge but keeps its geometry as an attribute) - otherwise the
+        route would cut straight across every bend between intersections."""
+        shape_between = getattr(router, "shape_between", None)
+        latlons = []
+        for i, node in enumerate(route):
+            latlons.append(router.node_lat_lon(node))
+            if shape_between and i < len(route) - 1:
+                latlons.extend(shape_between(node, route[i + 1]))
+        return latlons
 
     @staticmethod
     def compute_length(route_latlons):
@@ -50,6 +63,20 @@ class Route(object):
 
     def to_gpx(self, filename, name):
         return latlons_to_gpx(self.routeLatLons, filename, name)
+
+
+def segment_distance(router, a, b):
+    """Real road distance (km) between two directly-connected nodes a->b.
+    Falls back to straight-line distance for edges with no known curve
+    (synthetic tile-entry nodes, waypoints) - straight-line distance
+    underestimates curvy roads, which is why real edge length is preferred
+    whenever the router can provide it."""
+    edge_length = getattr(router, "edge_length", None)
+    if edge_length:
+        length = edge_length(a, b)
+        if length is not None:
+            return length
+    return distance(router.rnodes[a], router.rnodes[b])
 
 
 def debug_export_tiles(tiles):
@@ -71,9 +98,16 @@ ERR_NO = 0
 ERR_NO_TILE_ENTRY_POINT = 1
 ERR_ABORT_REQUEST = 2
 ERR_ROUTE_ERROR = 1000
+ERR_UNEXPECTED = 1001
+
+# Above this many tiles, do_route_with_crossing_zone's exact combinatorial
+# search (2^N states) becomes impractically slow - switch to the OR-Tools
+# based approximate solver instead, which scales to ~100 tiles in bounded
+# time at the cost of only considering one representative point per tile.
+OR_TOOLS_TILE_THRESHOLD = 15
 
 class MyRouter(object):
-    def __init__(self, router, start, end, tiles_ids, ways_points, config):
+    def __init__(self, router, start, end, tiles_ids, ways_points, config, gravel_tiles=None):
         self.router = router
         self._min_route = None
         self.min_length = None
@@ -88,6 +122,9 @@ class MyRouter(object):
         self.progress = 100.0
         self.config = config
         self.stored_tiles = {}
+        # Tiles the user has explicitly opted to allow gravel/unpaved
+        # surfaces for, after a first attempt found no paved entry point.
+        self.gravel_tiles = set(gravel_tiles or [])
 
     def abort(self):
         self._exit = True
@@ -97,6 +134,21 @@ class MyRouter(object):
         return self._complete
 
     def run(self):
+        """Thread entry point: any unhandled exception here would otherwise
+        kill the background thread silently, leaving is_complete False
+        forever - the GUI would then show "searching" indefinitely with no
+        error message at all."""
+        try:
+            return self._run()
+        except Exception as e:
+            print("Unexpected error during routing:", e)
+            self.error_code = ERR_UNEXPECTED
+            self.error_args = []
+            self.progress = 100.0
+            self._complete = True
+            return False
+
+    def _run(self):
         self.min_length = None
         self._min_route = None
         self.error_code = ERR_NO
@@ -115,7 +167,20 @@ class MyRouter(object):
                     Polygon(tile.linear_ring()).contains(Point(self.end.latlon)):
                 print("tile is in start or end")
                 continue
-            tile.get_entry_points(self.router)
+            if t in self.gravel_tiles and hasattr(self.router, "allow_gravel_near"):
+                # Grow the radius only as far as actually needed. A large
+                # blanket radius (needed for genuinely remote/sparse areas)
+                # unlocks a dense tangle of extra track/path edges in a
+                # well-connected area, which the routing solver then exploits
+                # as an unrealistic "shortcut hub" - producing exactly the
+                # zigzagging, unrealistic routes this was meant to prevent.
+                for radius_km in (0.3, 0.6, 1.0, 1.5, 3.0):
+                    self.router.allow_gravel_near(tile.lat, tile.lon, radius_km=radius_km)
+                    tile.get_entry_points(self.router)
+                    if tile.entryNodeId:
+                        break
+            else:
+                tile.get_entry_points(self.router)
             selected_tiles.append(tile)
             if not self.stored_tiles[t].entryNodeId:
                 self.error_code = ERR_NO_TILE_ENTRY_POINT
@@ -127,14 +192,40 @@ class MyRouter(object):
             selected_tiles.append(wp)
 
         debug_export_tiles(selected_tiles)
-        status, r = self.do_route_with_crossing_zone(self.start.nodeId, self.end.nodeId,
-                                                     frozenset(selected_tiles),
-                                                     self.config)
+
+        tile_ids_used = [t.uid for t in selected_tiles if isinstance(t, Tile)]
+        if len(tile_ids_used) > OR_TOOLS_TILE_THRESHOLD:
+            # Local import: avoids a circular import (ortools_router imports
+            # segment_distance from this module).
+            from ortools_router import solve_tile_route
+            self.progress = 50.0
+            waypoint_nodes = [wp.nodeId for wp in self.waypoints]
+            time_limit_s = min(90, max(15, len(tile_ids_used)))
+            status, r = solve_tile_route(self.router, self.start.nodeId, self.end.nodeId,
+                                          tile_ids_used, waypoint_nodes=waypoint_nodes,
+                                          time_limit_s=time_limit_s)
+        else:
+            status, r = self.do_route_with_crossing_zone(self.start.nodeId, self.end.nodeId,
+                                                         frozenset(selected_tiles),
+                                                         self.config)
+        if self._exit:
+            # solve_tile_route()/do_route_with_crossing_zone() are blocking
+            # calls with no internal abort check, so this is the earliest
+            # point after a mid-solve abort request where we can honor it -
+            # without this, an aborted OR-Tools solve would still complete
+            # and be reported as a successful route.
+            self.error_code = ERR_ABORT_REQUEST
+            return False
         if status != "success":
             self.error_code = ERR_ROUTE_ERROR
             self.error_args = ""
             route = None
         else:
+            from route_cleanup import remove_redundant_spurs
+            protected_nodes = {self.start.nodeId, self.end.nodeId}
+            protected_nodes.update(wp.nodeId for wp in self.waypoints)
+            r = remove_redundant_spurs(self.router, r, tile_ids_used, protected_nodes)
+
             route = Route(r, router=self.router)
             print("length:", route.length)
 
@@ -227,7 +318,7 @@ class MyRouter(object):
             # if len(queueSoFar["nodes"].split(",")) >= 2 and queueSoFar["nodes"].split(",")[-2] == str(end):
             #    return
 
-            edge_cost = distance(self.router.rnodes[item_start], self.router.rnodes[item_end]) / item_weight
+            edge_cost = segment_distance(self.router, item_start, item_end) / item_weight
 
             total_cost = queue_so_far["cost"] + edge_cost
 
@@ -393,7 +484,7 @@ class MyRouter(object):
             # if len(queueSoFar["nodes"].split(",")) >= 2 and queueSoFar["nodes"].split(",")[-2] == str(end):
             #    return
 
-            edge_cost = distance(self.router.rnodes[item_start], self.router.rnodes[item_end]) / item_weight
+            edge_cost = segment_distance(self.router, item_start, item_end) / item_weight
 
             # if turn around add additional cost
             if config.get('turnaround_cost', 0)>0:
@@ -594,6 +685,72 @@ class MyRouter(object):
             return False
 
 
+class OrienteeringRunner(object):
+    """Distance-budgeted planning ("start here, ~N km, which tiles are worth
+    it?"), run in a background thread. Deliberately duck-types MyRouter's
+    interface (progress/is_complete/error_code/error_args/min_route/abort)
+    so RouteServer and the existing /route_status polling endpoint can
+    handle it without any changes - only start_orienteering() below needs to
+    know this class exists."""
+
+    def __init__(self, router, start_loc, visited_tiles, budget_km):
+        self.router = router
+        self.start_loc = start_loc
+        self.visited_tiles = visited_tiles
+        self.budget_km = budget_km
+        self.error_code = ERR_NO
+        self.error_args = ""
+        self._exit = False
+        self._complete = False
+        self.progress = 50.0
+        self._min_route = None
+        self.selected_tiles = []
+
+    def abort(self):
+        self._exit = True
+
+    @property
+    def is_complete(self):
+        return self._complete
+
+    @property
+    def min_route(self):
+        return self._min_route
+
+    def run(self):
+        try:
+            self._run()
+        except Exception as e:
+            print("Unexpected error during orienteering planning:", e)
+            self.error_code = ERR_UNEXPECTED
+            self.error_args = []
+        self.progress = 100.0
+        self._complete = True
+
+    def _run(self):
+        # Local imports: avoids a circular import chain (orienteering_router
+        # imports from ortools_router, which imports segment_distance from
+        # this module).
+        from orienteering_router import plan_orienteering_route
+        from route_cleanup import remove_redundant_spurs
+
+        status, path, tiles = plan_orienteering_route(
+            self.router, self.start_loc, self.visited_tiles, self.budget_km, time_limit_s=75
+        )
+        if self._exit:
+            self.error_code = ERR_ABORT_REQUEST
+            return
+        if status != "success":
+            self.error_code = ERR_ROUTE_ERROR
+            self.error_args = ""
+            return
+
+        start_node = self.router.find_node(*self.start_loc)
+        path = remove_redundant_spurs(self.router, path, tiles, {start_node})
+        self.selected_tiles = tiles
+        self._min_route = Route(path, router=self.router)
+
+
 class RouteServer(object):
     def __init__(self):
         self.stored_tiles = {}
@@ -602,7 +759,8 @@ class RouteServer(object):
         self.mode = None
         self.thread = None
 
-    def start_route(self, mode, start_loc, end_loc, tiles, waypoints=None, config=None, thread=True):
+    def start_route(self, mode, start_loc, end_loc, tiles, waypoints=None, config=None, thread=True,
+                     gravel_tiles=None):
         if config is None:
             config = {}
         if waypoints is None:
@@ -618,15 +776,28 @@ class RouteServer(object):
         if mode != self.mode:
             self.mode = mode
             self.stored_tiles = {}
-            self.router = Datastore(mode, cache_dir=str(Path.home().joinpath('.tilescache')))
+            self.router = OsmnxDatastore(mode, cache_dir=str(Path.home().joinpath('.osmnx_cache')))
         coord_dict = CoordDict(self.router)
+
+        # Download/cache one region up front covering start, end and every
+        # selected tile - otherwise the many small get_area/get_area_rect
+        # calls tile.get_entry_points makes per tile would each try to pull
+        # their own (possibly overlapping) region.
+        preload_points = [start_loc, end_loc] + list(waypoints)
+        for t in tiles:
+            if isinstance(t, str) and '_' in t:
+                tile = Tile(t)
+                preload_points += [(tile.latN, tile.lonW), (tile.latS, tile.lonE)]
+        self.router.preload_region(preload_points)
+
         start_point = coord_dict.get(*start_loc)
         end_point = coord_dict.get(*end_loc)
         ways_points = [coord_dict.get(*wp) for wp in waypoints]
         print("Ways_points")
         print(ways_points)
 
-        self.myRouter = MyRouter(self.router, start_point, end_point, tiles, ways_points, config)
+        self.myRouter = MyRouter(self.router, start_point, end_point, tiles, ways_points, config,
+                                  gravel_tiles=gravel_tiles)
         if thread:
             self.thread = threading.Thread(target=self.myRouter.run)
             # Background thread will finish with the main program
@@ -634,6 +805,33 @@ class RouteServer(object):
             # Start YourLedRoutine() in a separate thread
             self.thread.start()
 
+        else:
+            self.myRouter.run()
+
+        return self.myRouter, self.is_complete, self.route
+
+    def start_orienteering(self, mode, start_loc, budget_km, visited_tiles, thread=True):
+        """Distance-budgeted planning instead of a fixed tile set - see
+        OrienteeringRunner. Shares the same self.myRouter slot as
+        start_route() (only one route computation happens per session at a
+        time either way), so the existing /route_status polling endpoint
+        works unchanged for this too.
+        """
+        if thread and self.myRouter and not self.myRouter.is_complete:
+            print("Abord previous route...")
+            self.myRouter.abort()
+            self.thread.join()
+            print("   ...OK")
+        if mode != self.mode:
+            self.mode = mode
+            self.stored_tiles = {}
+            self.router = OsmnxDatastore(mode, cache_dir=str(Path.home().joinpath('.osmnx_cache')))
+
+        self.myRouter = OrienteeringRunner(self.router, start_loc, visited_tiles, budget_km)
+        if thread:
+            self.thread = threading.Thread(target=self.myRouter.run)
+            self.thread.setDaemon(True)
+            self.thread.start()
         else:
             self.myRouter.run()
 

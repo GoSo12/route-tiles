@@ -54,7 +54,13 @@ __email__ = "mkuranowski@gmail.com"
 
 
 def weight_primary_roadcycle(t):
-    w = int(t.get("maxspeed", "80"))
+    maxspeed = t.get("maxspeed", "80")
+    if isinstance(maxspeed, list):
+        maxspeed = maxspeed[0]
+    try:
+        w = int(str(maxspeed).split()[0])
+    except (ValueError, IndexError):
+        w = 80
     if w <= 50:
         return 1
     if w <= 70:
@@ -80,6 +86,16 @@ TYPES = {
         "weights": {"primary": weight_primary_roadcycle, "secondary": 1, "tertiary": 1,
                     "unclassified": 0.9, "residential": 0.9, "living_street": 0.9, "cycleway": 0.9,
                     "footway": lambda t:filter_asphalt(t)*0.85, "path": lambda t:filter_asphalt(t)*0.85},
+        "access": ["access", "vehicle", "bicycle"],
+        "transport": "bicycle"
+    },
+    "gravelbike": {
+        # Unlike roadcycle (which excludes track and only allows path if
+        # asphalt), a gravel bike is happy on unpaved tracks/paths and
+        # actively prefers them over fast/busy roads.
+        "weights": {"trunk": 0.1, "primary": weight_primary_roadcycle, "secondary": 0.8, "tertiary": 0.9,
+                    "unclassified": 1, "residential": 0.9, "living_street": 0.8, "service": 0.9,
+                    "track": 1.0, "bridleway": 0.7, "footway": 0.6, "path": 0.9, "cycleway": 0.8},
         "access": ["access", "vehicle", "bicycle"],
         "transport": "bicycle"
     },

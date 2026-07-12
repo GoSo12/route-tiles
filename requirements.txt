@@ -1,5 +1,10 @@
 shapely
-fastkml
+fastkml<1.0
 gpxpy
 numpy
 markdown
+osmnx
+networkx
+scikit-learn
+ortools
+mercantile

@@ -91,7 +91,7 @@ def getKmlFromGeom(geom):
     p.geometry =  geom
     f2.append(p)
 
-    return k.to_string()
+    return k.to_string().replace('kml:', '')
 
 
 def compute_zones(tiles):

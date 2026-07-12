@@ -3,3 +3,7 @@ data/
 static/gpx
 static/icons
 venv/
+.venv/
+cache/
+.DS_Store
+Vergangenheit.rtf

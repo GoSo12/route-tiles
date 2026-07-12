@@ -1,36 +1,40 @@
+import mercantile
 from shapely.geometry import Point, LineString, LinearRing, Polygon
 from fastkml import kml, styles
 
 from utils import *
 
+# Tile-hunting zoom level (~1km2 tiles) - matches Squadrats/Statshunters/
+# VeloViewer's own grid, and every tile ID ("x_y") already stored/imported
+# from those services.
+ZOOM = 14
+
 
 def coord_from_tile(x, y=None):
-    n = 2 ** 14
+    """(lat, lon) of a tile's north-west corner."""
     if y is None:
         s = x.split('_')
         x = int(s[0])
         y = int(s[1])
-    lat = math.atan(math.sinh(math.pi * (1 - 2 * y / n))) * 180.0 / math.pi
-    lon = x / n * 360.0 - 180.0
-    return lat, lon
+    ul = mercantile.ul(x, y, ZOOM)
+    return ul.lat, ul.lng
 
 
 def geom_from_tile(x):
+    """[[lon, lat] of NW corner, [lon, lat] of SE corner] for a tile ID."""
     s = x.split('_')
     x = int(s[0])
     y = int(s[1])
-    return [list(coord_from_tile(x, y))[::-1], list(coord_from_tile(x + 1, y + 1))[::-1]]
+    b = mercantile.bounds(x, y, ZOOM)
+    return [[b.west, b.north], [b.east, b.south]]
 
 
 def tile_from_coord(lat, lon, output="list"):
-    n = 2 ** 14
-    x = math.floor(n * (lon + 180) / 360)
-    lat_r = lat * math.pi / 180
-    y = math.floor(n * (1 - (math.log(math.tan(lat_r) + 1 / math.cos(lat_r)) / math.pi)) / 2)
+    t = mercantile.tile(lon, lat, ZOOM)
     if output == "list":
-        return x, y
+        return t.x, t.y
     else:
-        return "{}_{}".format(x, y)
+        return "{}_{}".format(t.x, t.y)
 
 
 class Coord(object):
@@ -199,10 +203,10 @@ class Tile(ZoneWithEntries):
                     intersect_points = line.intersection(tile)
                     if intersect_points.geom_type == "Point":
                         intersect_points = [intersect_points]
-                    elif intersect_points.geom_type == "Line":
-                        intersect_points = [intersect_points.coords[0], intersect_points.coords[-1]]
+                    elif intersect_points.geom_type == "LineString":
+                        intersect_points = [Point(intersect_points.coords[0]), Point(intersect_points.coords[-1])]
                     else:
-                        intersect_points = list(intersect_points)
+                        intersect_points = list(intersect_points.geoms)
 
                     intersect_points = list(intersect_points)
 
@@ -232,6 +236,36 @@ class Tile(ZoneWithEntries):
                             router.routing[node_id] = {}
 
                     weight = router.routing[node_a][node_b]
+
+                    # Splitting node_a->node_b into a chain through the new
+                    # synthetic entry node(s) drops the original edge's
+                    # curve shape/real length unless explicitly carried
+                    # over - every tile crossing (at least 2 per visited
+                    # tile) would otherwise draw and cost a straight line
+                    # even where the real road curves.
+                    edge_shapes = getattr(router, "edge_shapes", None)
+                    edge_lengths = getattr(router, "edge_lengths", None)
+                    if edge_shapes is not None or edge_lengths is not None:
+                        original_shape = router.shape_between(node_a, node_b)
+                        original_length = router.edge_length(node_a, node_b)
+                        total_dist = distance((point_a.x, point_a.y), (point_b.x, point_b.y))
+
+                        def frac_at(p):
+                            if total_dist <= 0:
+                                return 1.0
+                            return distance((point_a.x, point_a.y), (p.x, p.y)) / total_dist
+
+                        chain_nodes = [node_a] + nodes_id + [node_b]
+                        chain_fracs = [0.0] + [frac_at(p) for p in intersect_points] + [1.0]
+                        n_shape = len(original_shape)
+
+                        for i in range(len(chain_nodes) - 1):
+                            a_frac, b_frac = chain_fracs[i], chain_fracs[i + 1]
+                            pair = (chain_nodes[i], chain_nodes[i + 1])
+                            if edge_shapes is not None:
+                                edge_shapes[pair] = original_shape[round(a_frac * n_shape):round(b_frac * n_shape)]
+                            if edge_lengths is not None and original_length is not None:
+                                edge_lengths[pair] = original_length * (b_frac - a_frac)
 
                     if node_a not in router.not_update_routing:
                         router.not_update_routing[node_a] = []
