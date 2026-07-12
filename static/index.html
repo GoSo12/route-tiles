@@ -76,6 +76,37 @@
             padding-right:15px;
         }
 
+        .card-header {
+            cursor: pointer;
+            padding: 0.5rem 0.9rem;
+        }
+        .card-header h3 {
+            margin: 0;
+            font-size: 1.05rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .card-body {
+            padding: 0.9rem;
+        }
+
+        #actionBar {
+            position: sticky;
+            bottom: 0;
+            background: #fff;
+            border-top: 1px solid #dee2e6;
+            padding: 10px 0 4px;
+            margin-top: 4px;
+            z-index: 10;
+        }
+        #run-button-group {
+            width: 100%;
+        }
+        #run-button-group > .btn {
+            flex: 1 1 0;
+        }
+
     </style>
 
 </head>
@@ -100,241 +131,252 @@
         </div>
         <div class="col-md-4 pmap" style="overflow-y:auto">
 
-            <h3 aria-expanded="true" data-target="#section-configuration" data-toggle="collapse"><span data-i18n="msg-section-configuration">Configuration</span></h3>
+            <div class="form-group row" style="margin-top:8px;">
+                <label for="switch-locale" class="col-sm-8 col-form-label" data-i18n="msg-config-language"></label>
+                <select id="switch-locale" class="col-sm-4 form-control">
+                    <option data-locale="en" href="#">English</option>
+                    <option data-locale="fr" href="#">Français</option>
+                </select>
+            </div>
 
-            <div class="collapse show" id="section-configuration">
-
-                <div class="form-group row">
-                    <label for="switch-locale" class="col-sm-8 col-form-label" data-i18n="msg-config-language"></label>
-                    <select id="switch-locale" class="col-sm-4 form-control">
-                        <option data-locale="en" href="#">English</option>
-                        <option data-locale="fr" href="#">Français</option>
-                    </select>
+            <!-- Kartendaten -->
+            <div class="card mb-3">
+                <div class="card-header py-2">
+                    <h3 aria-expanded="true" data-target="#card-mapdata" data-toggle="collapse">Kartendaten</h3>
                 </div>
-                <div class="form-group row">
-                    <label for="mode-selection" class="col-sm-8 col-form-label" data-i18n="msg-config-mode"></label>
-                    <select id="mode-selection" class="col-sm-4 form-control config-storage request-route" >
-                        <option data-i18n="message-mode-roadcycle" data-value="roadcycle" href="#">Roadcycle</option>
-                        <option data-i18n="message-mode-gravelbike" data-value="gravelbike" href="#">Gravel bike</option>
-                        <option data-i18n="message-mode-roadfoot" data-value="road_foot" href="#">Road foot</option>
-                        <option data-i18n="message-mode-foot" data-value="foot" href="#">Foot</option>
-                        <option data-i18n="message-mode-trail" data-value="trail" href="#">Trail</option>
-                    </select>
-                </div>
-                <div class="form-group row">
-                    <label for="turnaround-cost" class="col-sm-8 col-form-label" data-i18n="message-turnaround-cost"></label>
-                    <select id="turnaround-cost" class="col-sm-4 form-control config-storage request-route">
-                        <option data-i18n="message-cost-no" data-value="0" href="#">No cost</option>
-                        <option data-value="0.1" href="#">100m</option>
-                        <option data-value="0.2" href="#">200m</option>
-                        <option data-value="0.5" href="#">500m</option>
-                        <option data-value="1.0" href="#">1km</option>
-                        <option data-value="2.0" href="#">2km</option>
-                        <option data-value="5.0" href="#">5km</option>
-                    </select>
-                </div>
-                <div class="form-group row">
-                    <div class="custom-control custom-switch col-form-label col-sm-8">
-                        <input type="checkbox" class="custom-control-input config-storage" id="is-draw-circle">
-                        <label class="custom-control-label" for="is-draw-circle" data-i18n="message-draw-circle"></label>
+                <div class="collapse show card-body" id="card-mapdata">
+                    <div>
+                        <span data-i18n="msg-import-statshunters-message"></span>
+                        <a href="https://statshunters.com/share">statshunters.com</a>
                     </div>
-                    <input type="number" class="col-sm-2 form-control-range config-storage" min="1" max="500" step="1" id="circle-size">
-                    &nbsp;km
-                    <!--
-                    <select id="draw-circle" class="col-sm-4 form-control config-storage">
-                        <option data-i18n="message-circle-no" data-value="0" href="#">No circle</option>
-                        <option data-value="1000" href="#">1 km</option>
-                        <option data-value="2000" href="#">2 km</option>
-                        <option data-value="5000" href="#">5 km</option>
-                        <option data-value="10000" href="#">10 km</option>-->
-                    </select>
+                    <input id="statshunters_url" class="form-control config-storage" name="statshunters_url" type="text"/>
+                    <button class="btn btn-primary" id="bImportStatsHunters"
+                            data-i18n="msg-import-statshunters"></button>
+                    <button class="btn btn-outline-danger" id="bImportStatsHuntersReset">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
+                    <div>
+                        <span data-i18n="msg-import-statshunters-filter-message">Filter to apply on activities</span>
+                    </div>
+                    <input id="statshunters_filter" class="form-control config-storage" name="statshunters_filter" type="text"/>
+
+                    <div class="form-check">
+                      <input class="form-check-input config-storage" type="checkbox" value="" id="showVisitedTiles" checked>
+                      <label class="form-check-label" for="showVisitedTiles">Show visited tiles</label>
+                    </div>
+                    <div class="form-check">
+                      <input class="form-check-input config-storage" type="checkbox" value="" id="showMaxSquare">
+                      <label class="form-check-label" for="showMaxSquare" data-i18n="msg-show-max-square">Show max square</label>
+                    </div>
+                    <div class="form-check">
+                      <input class="form-check-input config-storage" type="checkbox" value="" id="showCluster">
+                      <label class="form-check-label" for="showCluster" data-i18n="msg-show-cluster">Show cluster</label>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="tileScoreMode">Tile potential</label>
+                        <select class="form-control" id="tileScoreMode">
+                            <option value="none">None</option>
+                            <option value="maxSquare">Max square growth</option>
+                            <option value="cluster">Cluster growth</option>
+                        </select>
+                        <small id="maxSquareCompletionInfo" class="form-text text-muted"></small>
+                    </div>
                 </div>
             </div>
 
-
-
-            <div aria-label="Starting point" class="btn-group" role="group">
-                <button class="btn btn-primary" data-i18n="message-start-button" id="bStart">Start
-                </button>
-                <!--input type="text" id="start" name="start" /-->
-                <button class="btn btn-danger" id="bClearStart">
-                    <i class="fas fa-trash-alt"></i>
-                </button>
-            </div>
-            <button class="btn btn-primary" id="bRevert">
-                <i class="fas fa-exchange-alt"></i>
-            </button>
-            <div aria-label="Ending point" class="btn-group" role="group">
-                <button class="btn btn-primary" data-i18n="message-end-button" id="bEnd">End</button>
-                <!--input type="text" id="end" name="end" /-->
-                <button class="btn btn-danger" id="bClearEnd">
-                    <i class="fas fa-trash-alt"></i>
-                </button>
-            </div>
-            <button class="btn btn-primary" id="addWaypoint">
-                <i class="fas fa-plus"></i>
-                <i class="fas fa-map-marker-alt"></i>
-            </button>
-
-            <div class="form-group">
-                <label>Modus</label>
-                <div class="form-check form-check-inline">
-                    <input checked class="form-check-input" id="routingModeManual" name="routingMode" type="radio" value="manual">
-                    <label class="form-check-label" for="routingModeManual">Manuelle Kachelauswahl</label>
+            <!-- Fortbewegung & Route -->
+            <div class="card mb-3">
+                <div class="card-header py-2">
+                    <h3 aria-expanded="true" data-target="#card-transport" data-toggle="collapse">Fortbewegung &amp; Route</h3>
                 </div>
-                <div class="form-check form-check-inline">
-                    <input class="form-check-input" id="routingModeBudget" name="routingMode" type="radio" value="budget">
-                    <label class="form-check-label" for="routingModeBudget">Streckenvorgabe</label>
-                </div>
-            </div>
+                <div class="collapse show card-body" id="card-transport">
+                    <div class="form-group row">
+                        <label for="mode-selection" class="col-sm-8 col-form-label" data-i18n="msg-config-mode"></label>
+                        <select id="mode-selection" class="col-sm-4 form-control config-storage request-route" >
+                            <option data-i18n="message-mode-roadcycle" data-value="roadcycle" href="#">Roadcycle</option>
+                            <option data-i18n="message-mode-gravelbike" data-value="gravelbike" href="#">Gravel bike</option>
+                            <option data-i18n="message-mode-roadfoot" data-value="road_foot" href="#">Road foot</option>
+                            <option data-i18n="message-mode-foot" data-value="foot" href="#">Foot</option>
+                            <option data-i18n="message-mode-trail" data-value="trail" href="#">Trail</option>
+                        </select>
+                    </div>
+                    <div class="form-group row">
+                        <label for="turnaround-cost" class="col-sm-8 col-form-label" data-i18n="message-turnaround-cost"></label>
+                        <select id="turnaround-cost" class="col-sm-4 form-control config-storage request-route">
+                            <option data-i18n="message-cost-no" data-value="0" href="#">No cost</option>
+                            <option data-value="0.1" href="#">100m</option>
+                            <option data-value="0.2" href="#">200m</option>
+                            <option data-value="0.5" href="#">500m</option>
+                            <option data-value="1.0" href="#">1km</option>
+                            <option data-value="2.0" href="#">2km</option>
+                            <option data-value="5.0" href="#">5km</option>
+                        </select>
+                    </div>
 
-            <div id="budgetModeControls" style="display:none;">
-                <label for="budgetKm">Ziel-Streckenlänge (km)</label>
-                <input class="form-control" id="budgetKm" min="1" type="number" value="30">
-            </div>
-
-            <div aria-label="Route actions" class="btn-group" id="run-button-group" role="group">
-                <!--<button type="button" class="btn btn-success" id="route">Chercher</button>-->
-                <button class="btn btn-warning" id="clear-tiles"
-                        type="button"><span data-i18n="message-clear-tiles-button">Clear tiles</span>
-                    & <i class="fas fa-map-marker-alt"></i>
-                </button>
-                <button class="btn btn-success" id="bPlanRoute" type="button">Route planen</button>
-                <button class="btn btn-danger" disabled id="bAbortRoute" type="button">Abbrechen</button>
-                <!--<button type="button" class="btn btn-info" id="export-tiles">Exporter les carrés en KML</button>-->
-            </div>
-            <a class="d-none btn btn-info" download href="" id="gpxDownload">Télécharger</a>
-
-            <p></p>
-
-            <div class="alert alert-light" id="progress-message">
-                <button class="btn btn-primary" id="button-download-route">
-                    <i class="fas fa-cloud-download-alt"></i>
-                </button>
-                <div id="spinner-searching" class="spinner-border spinner-border-sm text-primary" role="status" style="display:none;">
-                    <span class="sr-only">Searching...</span>
-                </div>
-                <span id="message"></span>
-                <span class="badge badge-light" style="float:right;" id="length"></span>
-            </div>
-
-            <div id="gpxMessage" class="alert alert-danger">
-                test
-            </div>
-
-            <h3 aria-expanded="true" data-target="#section-routes" data-toggle="collapse"><span data-i18n="msg-section-routes">Routes</span>
-            </h3>
-
-            <div class="collapse show" id="section-routes">
-                <div class="form-group row">
-                    <label for="traceName" class="col-form-label col-sm-4" data-i18n="msg-route-name">Name</label>
-                    <input id="traceName" class="form-control col-sm-6 config-storage" name="traceName" type="text"/>
-                    <div class="col-sm-2">
-                        <button class="btn btn-primary" id="addTrace" type="button">
-                            <i class="fas fa-plus"></i>
+                    <div aria-label="Starting point" class="btn-group" role="group">
+                        <button class="btn btn-primary" data-i18n="message-start-button" id="bStart">Start
+                        </button>
+                        <!--input type="text" id="start" name="start" /-->
+                        <button class="btn btn-danger" id="bClearStart">
+                            <i class="fas fa-trash-alt"></i>
                         </button>
                     </div>
-                </div>
-
-                <div class="form-group row" id="filter-form">
-                    <b>Routes:</b>
-                    <div class="custom-control custom-switch col-form-label">
-                        <input type="checkbox" class="custom-control-input config-storage" id="filter-activated">
-                        <label class="custom-control-label" for="filter-activated" data-i18n="msg-input-filter">Filter</label>
+                    <button class="btn btn-primary" id="bRevert">
+                        <i class="fas fa-exchange-alt"></i>
+                    </button>
+                    <div aria-label="Ending point" class="btn-group" role="group">
+                        <button class="btn btn-primary" data-i18n="message-end-button" id="bEnd">End</button>
+                        <!--input type="text" id="end" name="end" /-->
+                        <button class="btn btn-danger" id="bClearEnd">
+                            <i class="fas fa-trash-alt"></i>
+                        </button>
                     </div>
-                    <input id="filterField" class="form-control col-sm-6 config-storage" name="filterField" type="text"/>
+                    <button class="btn btn-primary" id="addWaypoint">
+                        <i class="fas fa-plus"></i>
+                        <i class="fas fa-map-marker-alt"></i>
+                    </button>
 
-                    <div class="dropdown">
-                      <button class="btn btn-primary dropdown-toggle" type="button" id="dropdownMenuButton" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                        Menu
-                      </button>
-                      <div class="dropdown-menu" aria-labelledby="dropdownMenuButton">
-                        <button id="rename-trace"    class="dropdown-item action_on_trace"><i class="fas fa-font" style="width:3ex;"              ></i>&nbsp;<span data-i18n="msg-button-rename"   >Rename</span></button>
-                        <button id="togpx-trace"     class="dropdown-item action_on_trace"><i class="fas fa-cloud-download-alt" style="width:3ex;"></i>&nbsp;<span data-i18n="msg-button-download" >Download</span></button>
-                        <button id="duplicate-trace" class="dropdown-item action_on_trace"><i class="fas fa-copy"        style="width:3ex;"       ></i>&nbsp;<span data-i18n="msg-button-duplicate">Duplicate</span></button>
-                        <button id="remove-trace"    class="dropdown-item action_on_trace"><i class="fas fa-trash-alt"   style="width:3ex;"       ></i>&nbsp;<span data-i18n="msg-button-delete"   >Delete</span></button>
-                        <div class="dropdown-divider"></div>
-                        <button id="merge-trace"     class="dropdown-item action_on_trace"><i class="fas fa-plus"   style="width:3ex;"            ></i>&nbsp;<span data-i18n="msg-button-merge"    >Merge</span></button>
-                        <button id="insert-trace"    class="dropdown-item action_on_trace"><i class="fas fa-code-branch"  style="width:3ex;"      ></i>&nbsp;<span data-i18n="msg-button-insert"   >Insert</span></button>
-                        <button id="split-trace"     class="dropdown-item action_on_trace"><i class="fas fa-cut"  style="width:3ex;"       ></i>&nbsp;<span data-i18n="msg-button-split"   >Split</span></button>
-                        <div class="dropdown-divider"></div>
-                        <button id="button-undo"     class="dropdown-item"                ><i class="fas fa-undo"       style="width:3ex;"        ></i>&nbsp;<span data-i18n="msg-button-undo"     >Undo</span></button>
-                      </div>
+                    <div class="form-group row" style="margin-top:10px;">
+                        <div class="custom-control custom-switch col-form-label col-sm-8">
+                            <input type="checkbox" class="custom-control-input config-storage" id="is-draw-circle">
+                            <label class="custom-control-label" for="is-draw-circle" data-i18n="message-draw-circle"></label>
+                        </div>
+                        <input type="number" class="col-sm-2 form-control-range config-storage" min="1" max="500" step="1" id="circle-size">
+                        &nbsp;km
                     </div>
                 </div>
-
-                <div class="alert alert-info alert-dismissible fade show d-none" role="alert" id="alert-merge">
-                  <strong>Merge action</strong><br/> Select the next trace to merge with
-                  <button type="button" class="close" aria-label="Close">
-                    <span aria-hidden="true">&times;</span>
-                  </button>
-                </div>
-
-                <div class="alert alert-info alert-dismissible fade show d-none" role="alert" id="alert-insert">
-                  <strong>Insert action</strong><br/> Select the next trace to insert in
-                  <button type="button" class="close" aria-label="Close">
-                    <span aria-hidden="true">&times;</span>
-                  </button>
-                </div>
-
-                <div class="alert alert-info alert-dismissible fade show d-none" role="alert" id="alert-split">
-                  <strong>Split action</strong><br/> Click on map on split point
-                  <button type="button" class="close" aria-label="Close">
-                    <span aria-hidden="true">&times;</span>
-                  </button>
-                </div>
-
-                <div class="list-group" id="traces-list">
-                </div>
-                <!--<div>
-                    <div class="form-check">
-                      <input class="form-check-input" type="checkbox" value="" id="show-tiles">
-                      <label class="form-check-label" for="show-tiles">
-                        Montrer les carrés
-                      </label>
-                    </div>
-                </div>-->
             </div>
 
-            <h3 aria-expanded="true" data-target="#section-missing" data-toggle="collapse"><span data-i18n="msg-title-missing-tiles">Missing tiles</span></h3>
+            <!-- Ziel: Kacheln wählen -->
+            <div class="card mb-3">
+                <div class="card-header py-2">
+                    <h3 aria-expanded="true" data-target="#card-target" data-toggle="collapse">Ziel: Kacheln wählen</h3>
+                </div>
+                <div class="collapse show card-body" id="card-target">
+                    <div class="btn-group btn-group-toggle btn-block" data-toggle="buttons" role="group" aria-label="Auswahl-Modus">
+                        <label class="btn btn-outline-primary active">
+                            <input checked id="routingModeManual" name="routingMode" type="radio" value="manual"> Manuell
+                        </label>
+                        <label class="btn btn-outline-primary">
+                            <input id="routingModeBudget" name="routingMode" type="radio" value="budget"> Streckenvorgabe
+                        </label>
+                    </div>
 
-            <div class="collapse show" id="section-missing">
-                <div>
-                    <span data-i18n="msg-import-statshunters-message"></span>
-                    <a href="https://statshunters.com/share">statshunters.com</a>
-                </div>
-                <input id="statshunters_url" class="form-control config-storage" name="statshunters_url" type="text"/>
-                <button class="btn btn-primary" id="bImportStatsHunters"
-                        data-i18n="msg-import-statshunters"></button>
-                <button class="btn btn-outline-danger" id="bImportStatsHuntersReset">
-                    <i class="fas fa-trash-alt"></i>
-                </button>
-                <div>
-                    <span data-i18n="msg-import-statshunters-filter-message">Filter to apply on activities</span>
-                </div>
-                <input id="statshunters_filter" class="form-control config-storage" name="statshunters_filter" type="text"/>
+                    <div id="manualModeControls" class="mt-2">
+                        <small class="form-text text-muted"><span id="selectedTileCount">0</span> Kacheln ausgewählt</small>
+                    </div>
 
-                <div class="form-check">
-                  <input class="form-check-input config-storage" type="checkbox" value="" id="showVisitedTiles" checked>
-                  <label class="form-check-label" for="showVisitedTiles">Show visited tiles</label>
+                    <div id="budgetModeControls" class="mt-2" style="display:none;">
+                        <label for="budgetKm">Ziel-Streckenlänge (km)</label>
+                        <input class="form-control" id="budgetKm" min="1" type="number" value="30">
+                    </div>
                 </div>
-                <div class="form-check">
-                  <input class="form-check-input config-storage" type="checkbox" value="" id="showMaxSquare">
-                  <label class="form-check-label" for="showMaxSquare" data-i18n="msg-show-max-square">Show max square</label>
+            </div>
+
+            <!-- Status -->
+            <div class="card mb-3">
+                <div class="card-header py-2">
+                    <h3 aria-expanded="true" data-target="#card-status" data-toggle="collapse">Status</h3>
                 </div>
-                <div class="form-check">
-                  <input class="form-check-input config-storage" type="checkbox" value="" id="showCluster">
-                  <label class="form-check-label" for="showCluster" data-i18n="msg-show-cluster">Show cluster</label>
+                <div class="collapse show card-body" id="card-status">
+                    <div class="alert alert-light" id="progress-message">
+                        <button class="btn btn-primary" id="button-download-route">
+                            <i class="fas fa-cloud-download-alt"></i>
+                        </button>
+                        <div id="spinner-searching" class="spinner-border spinner-border-sm text-primary" role="status" style="display:none;">
+                            <span class="sr-only">Searching...</span>
+                        </div>
+                        <span id="message"></span>
+                        <span class="badge badge-light" style="float:right;" id="length"></span>
+                    </div>
+
+                    <div id="gpxMessage" class="alert alert-danger">
+                        test
+                    </div>
+                    <a class="d-none btn btn-info" download href="" id="gpxDownload">Télécharger</a>
+                </div>
+            </div>
+
+            <!-- Gespeicherte Routen -->
+            <div class="card mb-3">
+                <div class="card-header py-2">
+                    <h3 aria-expanded="false" data-target="#section-routes" data-toggle="collapse"><span data-i18n="msg-section-routes">Routes</span></h3>
                 </div>
 
-                <div class="form-group">
-                    <label for="tileScoreMode">Tile potential</label>
-                    <select class="form-control" id="tileScoreMode">
-                        <option value="none">None</option>
-                        <option value="maxSquare">Max square growth</option>
-                        <option value="cluster">Cluster growth</option>
-                    </select>
-                    <small id="maxSquareCompletionInfo" class="form-text text-muted"></small>
+                <div class="collapse card-body" id="section-routes">
+                    <div class="form-group row">
+                        <label for="traceName" class="col-form-label col-sm-4" data-i18n="msg-route-name">Name</label>
+                        <input id="traceName" class="form-control col-sm-6 config-storage" name="traceName" type="text"/>
+                        <div class="col-sm-2">
+                            <button class="btn btn-primary" id="addTrace" type="button">
+                                <i class="fas fa-plus"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="form-group row" id="filter-form">
+                        <b>Routes:</b>
+                        <div class="custom-control custom-switch col-form-label">
+                            <input type="checkbox" class="custom-control-input config-storage" id="filter-activated">
+                            <label class="custom-control-label" for="filter-activated" data-i18n="msg-input-filter">Filter</label>
+                        </div>
+                        <input id="filterField" class="form-control col-sm-6 config-storage" name="filterField" type="text"/>
+
+                        <div class="dropdown">
+                          <button class="btn btn-primary dropdown-toggle" type="button" id="dropdownMenuButton" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                            Menu
+                          </button>
+                          <div class="dropdown-menu" aria-labelledby="dropdownMenuButton">
+                            <button id="rename-trace"    class="dropdown-item action_on_trace"><i class="fas fa-font" style="width:3ex;"              ></i>&nbsp;<span data-i18n="msg-button-rename"   >Rename</span></button>
+                            <button id="togpx-trace"     class="dropdown-item action_on_trace"><i class="fas fa-cloud-download-alt" style="width:3ex;"></i>&nbsp;<span data-i18n="msg-button-download" >Download</span></button>
+                            <button id="duplicate-trace" class="dropdown-item action_on_trace"><i class="fas fa-copy"        style="width:3ex;"       ></i>&nbsp;<span data-i18n="msg-button-duplicate">Duplicate</span></button>
+                            <button id="remove-trace"    class="dropdown-item action_on_trace"><i class="fas fa-trash-alt"   style="width:3ex;"       ></i>&nbsp;<span data-i18n="msg-button-delete"   >Delete</span></button>
+                            <div class="dropdown-divider"></div>
+                            <button id="merge-trace"     class="dropdown-item action_on_trace"><i class="fas fa-plus"   style="width:3ex;"            ></i>&nbsp;<span data-i18n="msg-button-merge"    >Merge</span></button>
+                            <button id="insert-trace"    class="dropdown-item action_on_trace"><i class="fas fa-code-branch"  style="width:3ex;"      ></i>&nbsp;<span data-i18n="msg-button-insert"   >Insert</span></button>
+                            <button id="split-trace"     class="dropdown-item action_on_trace"><i class="fas fa-cut"  style="width:3ex;"       ></i>&nbsp;<span data-i18n="msg-button-split"   >Split</span></button>
+                            <div class="dropdown-divider"></div>
+                            <button id="button-undo"     class="dropdown-item"                ><i class="fas fa-undo"       style="width:3ex;"        ></i>&nbsp;<span data-i18n="msg-button-undo"     >Undo</span></button>
+                          </div>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-info alert-dismissible fade show d-none" role="alert" id="alert-merge">
+                      <strong>Merge action</strong><br/> Select the next trace to merge with
+                      <button type="button" class="close" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                      </button>
+                    </div>
+
+                    <div class="alert alert-info alert-dismissible fade show d-none" role="alert" id="alert-insert">
+                      <strong>Insert action</strong><br/> Select the next trace to insert in
+                      <button type="button" class="close" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                      </button>
+                    </div>
+
+                    <div class="alert alert-info alert-dismissible fade show d-none" role="alert" id="alert-split">
+                      <strong>Split action</strong><br/> Click on map on split point
+                      <button type="button" class="close" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                      </button>
+                    </div>
+
+                    <div class="list-group" id="traces-list">
+                    </div>
+                </div>
+            </div>
+
+            <!-- STICKY ACTION BAR - Kacheln leeren / Route planen / Abbrechen, always visible -->
+            <div id="actionBar">
+                <div aria-label="Route actions" class="btn-group" id="run-button-group" role="group">
+                    <button class="btn btn-warning" id="clear-tiles"
+                            type="button"><span data-i18n="message-clear-tiles-button">Clear tiles</span>
+                        & <i class="fas fa-map-marker-alt"></i>
+                    </button>
+                    <button class="btn btn-success" id="bPlanRoute" type="button">Route planen</button>
+                    <button class="btn btn-danger" disabled id="bAbortRoute" type="button">Abbrechen</button>
                 </div>
             </div>
         </div>

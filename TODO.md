@@ -2,19 +2,13 @@
 
 Offene Punkte, geordnet nach Themenblock. Erledigtes wird nach `UPDATES.md` verschoben, nicht hier gestrichen liegen gelassen.
 
-## 1. GUI-Überarbeitung
-
-Frontend-Stack ist mehrere Jahre alt (siehe Modernisierungs-Audit unten) und wirkt nicht mehr zeitgemäß. Umfang/Ansatz noch nicht festgelegt (reines Redesign vs. Bibliotheks-Update). Ein möglicher Startpunkt: der neue Budget-Modus-Umschalter ist bisher nur schlicht per Radio-Buttons + Feldern gelöst, könnte im Zuge einer GUI-Überarbeitung visuell aufgewertet werden.
-
-- Visueller Vorschlag (statisches HTML-Mockup, noch nicht umgesetzt) als Artefakt erstellt: gruppiert die bisher flach aufgelisteten Bedienelemente in klar abgegrenzte Panels (Kartendaten / Fortbewegung & Route / Ziel: Kacheln wählen / Status / Gespeicherte Routen), löst Manuell/Streckenvorgabe über einen Segmented-Control statt Radio-Buttons, und macht "Kacheln leeren"/"Route planen"/"Abbrechen" zu einer permanent sichtbaren, angehefteten Aktionsleiste am unteren Panel-Rand statt einer Button-Gruppe mitten im Formular. Entscheidung über Umsetzung steht noch aus.
-
-## 2. Komplettes Durchtesten des Codes
+## 1. Komplettes Durchtesten des Codes
 
 Systematischer Test-Durchgang über den gesamten Code (nicht nur Einzelfall-Stichproben wie bisher): alle Fahrmodi, alle Solver-Pfade (exakt/OR-Tools/Orienteering), Schotter-Freigabe, Sackgassen-Bereinigung, Scoring-Funktionen, Statshunters-Import – idealerweise mit einer nachvollziehbaren Sammlung von Testfällen/Regressionstests statt Ad-hoc-`curl`-Aufrufen wie bisher in der Session.
 
 - ✅ Erledigt: `/abort_route` gegen eine länger laufende OR-Tools-Berechnung (20 Kacheln) getestet. Dabei einen echten Bug gefunden und behoben (fehlende `self._exit`-Prüfung nach `solve_tile_route()` – Abbruch wurde ignoriert, Route lief immer zu Ende), siehe `UPDATES.md`. Noch offen: derselbe End-to-End-Test für den Orienteering-Pfad (`/start_orienteering`) steht noch aus (dafür wird eine echte Statshunters-URL benötigt, ein leerer Testaufruf schlägt fehl).
 
-## 3. Modernisierungs-Audit (Abgleich mit den ursprünglichen Empfehlungen vom Sitzungsbeginn)
+## 2. Modernisierungs-Audit (Abgleich mit den ursprünglichen Empfehlungen vom Sitzungsbeginn)
 
 Zu Beginn dieses Projekts wurden folgende Technologien empfohlen – Status:
 

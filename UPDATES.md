@@ -4,6 +4,15 @@ Laufendes Änderungsprotokoll für dieses Projekt (Fork von [route-tiles](https:
 
 ---
 
+## GUI-Überarbeitung: Gruppierte Panels, Segmented Control, angeheftete Aktionsleiste
+
+- **Umsetzung** des zuvor abgestimmten Vorschlags (statisches Mockup, siehe vorheriger `TODO.md`-Eintrag) in `static/index.html`/`static/index.js`. Bewusst *kein* Wechsel des Frontend-Stacks (weiterhin Bootstrap 4/jQuery, siehe Modernisierungs-Audit in `TODO.md`) – nur Umstrukturierung/Restyling der bestehenden Bootstrap-Bausteine, damit alle JS-gesteuerten Widgets (Modal, Dropdown, Popover, Collapse) unverändert funktionieren.
+- **Gruppierung:** die bisher flach aufgelisteten Bedienelemente sind jetzt fünf klar abgegrenzte, einzeln einklappbare Bootstrap-`.card`-Panels (Kartendaten / Fortbewegung & Route / Ziel: Kacheln wählen / Status / Gespeicherte Routen). "Gespeicherte Routen" ist standardmäßig eingeklappt (selten gebraucht), die anderen vier offen. Die Sprachauswahl sitzt als eigene Zeile oberhalb der Panels.
+- **Segmented Control:** Manuell/Streckenvorgabe nutzt jetzt Bootstraps `btn-group-toggle` statt einzeln stehender Radio-Buttons – technisch weiterhin dieselben `<input type="radio" name="routingMode">`-Elemente, daher unverändertes JS (`$('input[name="routingMode"]:checked')`).
+- **Angeheftete Aktionsleiste:** "Kacheln leeren"/"Route planen"/"Abbrechen" (`#run-button-group`) stehen jetzt in einer eigenen `#actionBar` mit `position: sticky; bottom: 0`, bleiben also beim Scrollen der rechten Spalte immer sichtbar, statt mitten im Formular zu stehen.
+- **Kleine Ergänzung:** Im Manuell-Modus zeigt `#selectedTileCount` jetzt die Anzahl aktuell ausgewählter Kacheln an (aktualisiert bei Kachel-Klick, "Kacheln leeren", Schotter-Dialog "Kachel entfernen" und beim Laden aus `localStorage`).
+- **Verifiziert:** lokaler Server + Playwright (headless Chromium) – alle fünf Panels rendern und lassen sich unabhängig ein-/ausklappen, Segmented Control schaltet `#manualModeControls`/`#budgetModeControls` korrekt um, Aktionsleiste bleibt beim Scrollen sichtbar, keine JavaScript-Fehler in der Konsole.
+
 ## Fix: Browser-Cache konnte alte index.html/index.js ausliefern
 
 - **Symptom:** Nutzer meldete, dass bereits behobene Bugs (automatischer Routenstart im manuellen Modus, fehlende Buttons im Streckenvorgabe-Modus) weiterhin auftraten. Serverseitiger Abgleich (`curl` gegen `/index.html`/`/index.js`) zeigte, dass der Server exakt den aktuellen, korrekten Stand ausliefert (byte-identisch zur Datei auf der Festplatte) – der Fehler lag also nicht mehr im Code, sondern vermutlich an einer vom Browser gecachten alten Version dieser beiden Dateien (werden ohne Cache-Busting-Dateinamen/-Query ausgeliefert).

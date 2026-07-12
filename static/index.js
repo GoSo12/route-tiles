@@ -158,6 +158,10 @@ $(document).ready(function(){
         var clusterScores = {}
         var clusterScoresMax = 1
 
+        function updateSelectedTileCount() {
+            $('#selectedTileCount').text(selected_tiles.length);
+        }
+
 
         function updateMapTiles(e) {
             // Tiles already drawn are left alone regardless of zoom - a
@@ -258,6 +262,7 @@ $(document).ready(function(){
                     tile.select(1);
                 }
                 localStorage.setItem("selected_tiles", JSON.stringify(selected_tiles));
+                updateSelectedTileCount();
 
                 request_route();
             }
@@ -314,6 +319,7 @@ $(document).ready(function(){
                                         selected_tiles.push(tileId);
                                     }
                                 });
+                                updateSelectedTileCount();
                                 displayed_tiles.clear();
                                 tilesLayerGroup.clearLayers();
                                 updateMapTiles();
@@ -382,6 +388,7 @@ $(document).ready(function(){
             if (idx !== -1) {
                 selected_tiles.splice(idx, 1);
                 localStorage.setItem("selected_tiles", JSON.stringify(selected_tiles));
+                updateSelectedTileCount();
                 let tile = displayed_tiles.get(tileId);
                 if (tile) {
                     tile.select(0);
@@ -514,6 +521,7 @@ $(document).ready(function(){
         $('input[name="routingMode"]').on("change", function() {
             let budgetMode = $('input[name="routingMode"]:checked').val() === 'budget';
             $('#budgetModeControls').toggle(budgetMode);
+            $('#manualModeControls').toggle(!budgetMode);
         });
 
         $('#bPlanRoute').on("click", function(e) {
@@ -790,6 +798,7 @@ $(document).ready(function(){
             selected_tiles = [];
             gravel_tiles = [];
             localStorage.setItem("selected_tiles", JSON.stringify(selected_tiles));
+            updateSelectedTileCount();
             updateMapTiles();
 
             waypoints.forEach(function(wp) {
@@ -930,6 +939,7 @@ $(document).ready(function(){
                 } // COMPATIBILITY
             }
 
+            updateSelectedTileCount();
             updateMapTiles();
 
             request_route();
