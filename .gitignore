@@ -10,3 +10,4 @@ Vergangenheit.rtf
 route_timing_history.json
 .pytest_cache/
 __pycache__/
+.idea/
