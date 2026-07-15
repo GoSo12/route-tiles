@@ -1,9 +1,7 @@
 import http.server
-import io
 import json
 import os
-import random
-import re
+import secrets
 import socketserver
 import string
 import struct
@@ -17,11 +15,18 @@ from urllib import parse
 
 from tilesrouter import RouteServer, latlons_to_gpx
 from tile import tiles_to_kml
-from statshunters import get_statshunters_activities, tiles_from_activities, compute_max_square, compute_cluster, statshunters_path
-from scoring import score_cluster_candidates, find_best_square_completion
+from statshunters import get_statshunters_activities, tiles_from_activities, activity_filter_options, compute_max_square, compute_cluster, statshunters_path
+from scoring import find_best_square_completion
+from route_timing import estimate_time
 
 
 PORT = 8000
+
+# Bundled sample tile-hunting history (not user data - see demo_data/README
+# if present) so the app can be tried/demoed without a real Statshunters
+# account. Kept outside data/ (gitignored, reserved for real per-user
+# import caches) so it actually ships with the repo.
+DEMO_DATA_FOLDER = Path(__file__).parent.joinpath('demo_data')
 
 sessionDict = {}
 chars = string.ascii_letters + string.digits
@@ -56,8 +61,15 @@ def check_sessions():
 
 
 def generate_random(length):
-    """Return a random string of specified length (used for session id's)"""
-    return ''.join([random.choice(chars) for _ in range(length)])
+    """Return a random string of specified length (used for session id's).
+
+    secrets.choice(), not random.choice() - session ids are an
+    unauthenticated bearer token (whoever holds one can read/abort that
+    session's in-progress route search), so they need to come from a CSPRNG
+    rather than Python's default Mersenne Twister random module, which is
+    predictable given enough observed output.
+    """
+    return ''.join([secrets.choice(chars) for _ in range(length)])
 
 
 class RouteHttpServer(http.server.SimpleHTTPRequestHandler):
@@ -108,19 +120,44 @@ class RouteHttpServer(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(message.encode('utf-8'))
 
+    def _activity_filter_from_qs(self, qs):
+        # Fixed dropdown value from the UI (see activity_filter_options()),
+        # never a free-form expression - deliberately not passed to eval().
+        return qs['type'][0] if qs.get('type', [''])[0] else None
+
+    def _activities_folder(self, qs, allow_fetch=False):
+        """Resolve which activities folder a request should read from -
+        the bundled demo dataset if demo=1 is set, otherwise the real
+        Statshunters share link in url= (validated by statshunters_path()/
+        get_statshunters_activities(), which raise ValueError for anything
+        that isn't a genuine statshunters.com link - see UPDATES.md for
+        why that validation exists).
+
+        Demo mode deliberately short-circuits before url= is even looked
+        at - it never touches network fetching or the url-validation path,
+        so it can't reopen that surface no matter what a client sends
+        alongside demo=1.
+        """
+        if qs.get('demo', ['0'])[0] == '1':
+            return DEMO_DATA_FOLDER
+        url = qs['url'][0]
+        data_folder = Path(__file__).parent.joinpath('data')
+        if allow_fetch:
+            return get_statshunters_activities(url, data_folder)
+        return statshunters_path(url, data_folder)
+
     def do_GET_statshunters(self):
         parsed_path = parse.urlparse(self.path)
         qs = parse.parse_qs(parsed_path.query, keep_blank_values=True)
-        url = qs['url'][0]
-        if 'filter' in qs:
-            sh_filter = qs['filter'][0]
-        else:
-            sh_filter = None
+        activity_type = self._activity_filter_from_qs(qs)
 
-        data_folder = Path(__file__).parent.joinpath('data')
-        folder = get_statshunters_activities(url, data_folder)
+        try:
+            folder = self._activities_folder(qs, allow_fetch=True)
+        except ValueError as e:
+            self.wfile.write(json.dumps({'status': 'Fail', 'message': str(e)}).encode('utf-8'))
+            return
 
-        tiles = tiles_from_activities(folder, filter_str=sh_filter)
+        tiles = tiles_from_activities(folder, activity_type=activity_type)
 
         kml_max_square = compute_max_square(tiles)
         kml_cluster = compute_cluster(tiles)
@@ -128,22 +165,22 @@ class RouteHttpServer(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(json.dumps({'status': 'OK',
                                      'tiles': list(tiles),
                                      'maxSquare': kml_max_square,
-                                     'cluster': kml_cluster}).encode('utf-8'))
+                                     'cluster': kml_cluster,
+                                     'filterOptions': activity_filter_options(folder)}).encode('utf-8'))
 
 
     def do_GET_statshunters_filter(self):
         parsed_path = parse.urlparse(self.path)
         qs = parse.parse_qs(parsed_path.query, keep_blank_values=True)
-        url = qs['url'][0]
-        if 'filter' in qs:
-            sh_filter = qs['filter'][0]
-        else:
-            sh_filter = None
+        activity_type = self._activity_filter_from_qs(qs)
 
-        data_folder = Path(__file__).parent.joinpath('data')
-        folder = statshunters_path(url, data_folder)
+        try:
+            folder = self._activities_folder(qs)
+        except ValueError as e:
+            self.wfile.write(json.dumps({'status': 'Fail', 'message': str(e)}).encode('utf-8'))
+            return
 
-        tiles = tiles_from_activities(folder, filter_str=sh_filter)
+        tiles = tiles_from_activities(folder, activity_type=activity_type)
 
         kml_max_square = compute_max_square(tiles)
 
@@ -152,25 +189,33 @@ class RouteHttpServer(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(json.dumps({'status': 'OK',
                                      'tiles': list(tiles),
                                      'maxSquare': kml_max_square,
-                                     'cluster': kml_cluster}).encode('utf-8'))
+                                     'cluster': kml_cluster,
+                                     'filterOptions': activity_filter_options(folder)}).encode('utf-8'))
 
     def do_GET_scoring(self):
         parsed_path = parse.urlparse(self.path)
         qs = parse.parse_qs(parsed_path.query, keep_blank_values=True)
-        url = qs['url'][0]
-        if 'filter' in qs:
-            sh_filter = qs['filter'][0]
-        else:
-            sh_filter = None
+        activity_type = self._activity_filter_from_qs(qs)
 
-        data_folder = Path(__file__).parent.joinpath('data')
-        folder = statshunters_path(url, data_folder)
+        try:
+            folder = self._activities_folder(qs)
+        except ValueError as e:
+            self.wfile.write(json.dumps({'status': 'Fail', 'message': str(e)}).encode('utf-8'))
+            return
 
-        tiles = tiles_from_activities(folder, filter_str=sh_filter)
+        tiles = tiles_from_activities(folder, activity_type=activity_type)
 
         self.wfile.write(json.dumps({'status': 'OK',
-                                     'clusterScores': score_cluster_candidates(tiles),
                                      'maxSquareCompletion': find_best_square_completion(tiles)}).encode('utf-8'))
+
+    def do_GET_estimate_route_time(self):
+        parsed_path = parse.urlparse(self.path)
+        qs = parse.parse_qs(parsed_path.query, keep_blank_values=True)
+        solver = qs['solver'][0]
+        param_value = float(qs['param'][0])
+
+        self.wfile.write(json.dumps({'status': 'OK',
+                                     'estimatedSeconds': estimate_time(solver, param_value)}).encode('utf-8'))
 
     def do_GET_start_route(self):
         parsed_path = parse.urlparse(self.path)
@@ -230,12 +275,15 @@ class RouteHttpServer(http.server.SimpleHTTPRequestHandler):
         start = [float(qs['start[]'][0]), float(qs['start[]'][1])]
         budget_km = float(qs['budgetKm'][0])
         mode = qs['mode'][0]
-        url = qs['url'][0]
-        sh_filter = qs['filter'][0] if 'filter' in qs else None
+        activity_type = self._activity_filter_from_qs(qs)
 
-        data_folder = Path(__file__).parent.joinpath('data')
-        folder = statshunters_path(url, data_folder)
-        visited_tiles = tiles_from_activities(folder, filter_str=sh_filter)
+        try:
+            folder = self._activities_folder(qs)
+        except ValueError as e:
+            self.wfile.write(json.dumps({'status': 'Fail', 'message': str(e),
+                                          'sessionId': self.sessionId}).encode('utf-8'))
+            return
+        visited_tiles = tiles_from_activities(folder, activity_type=activity_type)
 
         answer = {'sessionId': self.sessionId}
 
@@ -379,45 +427,6 @@ class RouteHttpServer(http.server.SimpleHTTPRequestHandler):
                 answer = {'status': "Fail", 'message': "error generating GPX"}
             self.wfile.write(json.dumps(answer).encode('utf-8'))
 
-    def deal_post_data(self):
-        content_type = self.headers['content-type']
-        if not content_type:
-            return None, "Content-Type header doesn't contain boundary"
-        boundary = content_type.split("=")[1].encode()
-        remain_bytes = int(self.headers['content-length'])
-        line = self.rfile.readline()
-        remain_bytes -= len(line)
-        if boundary not in line:
-            return None, "Content NOT begin with boundary "
-        line = self.rfile.readline()
-        remain_bytes -= len(line)
-        fn = re.findall(r'Content-Disposition.*name="file"; filename="(.*)"', line.decode())
-        if not fn:
-            return None, "Can't find out file name..."
-        path = self.translate_path(self.path)
-        fn = os.path.join(path, fn[0])
-        line = self.rfile.readline()
-        remain_bytes -= len(line)
-        line = self.rfile.readline()
-        remain_bytes -= len(line)
-        out = io.BytesIO()
-        pre_line = self.rfile.readline()
-        remain_bytes -= len(pre_line)
-        while remain_bytes > 0:
-            line = self.rfile.readline()
-            remain_bytes -= len(line)
-            if boundary in line:
-                pre_line = pre_line[0:-1]
-                if pre_line.endswith(b'\r'):
-                    pre_line = pre_line[0:-1]
-                out.write(pre_line)
-                out.seek(0)
-                return out, "File '%s' upload success!" % fn
-            else:
-                out.write(pre_line)
-                pre_line = line
-        return None, "Unexpected ends of data."
-
     def get_session(self):
 
         parsed_path = parse.urlparse(self.path)
@@ -444,8 +453,14 @@ def route_tiles_server(port):
     Path(__file__).parent.joinpath('static', 'gpx').mkdir(exist_ok=True)
     Path(__file__).parent.joinpath('debug').mkdir(exist_ok=True)
     handler_class = partial(RouteHttpServer, directory=str(Path(__file__).parent.joinpath('static')))
-    socketserver.TCPServer.allow_reuse_address = True
-    with socketserver.TCPServer(("", port), handler_class) as httpd:
+    # Plain TCPServer processes requests strictly one at a time - a slow or
+    # hung request (e.g. get_statshunters_activities() retrying against an
+    # unreachable host for up to ~1h, see UPDATES.md) blocked the entire
+    # server for every tab/user until it returned. ThreadingTCPServer
+    # handles each request on its own thread instead.
+    socketserver.ThreadingTCPServer.allow_reuse_address = True
+    socketserver.ThreadingTCPServer.daemon_threads = True
+    with socketserver.ThreadingTCPServer(("", port), handler_class) as httpd:
         print("serving at port", port)
         httpd.serve_forever()
 

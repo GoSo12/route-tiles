@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import threading
+import time
 from pathlib import Path
 
 import gpxpy
@@ -32,6 +33,48 @@ def latlons_to_gpx(latlons, filename, name):
     return True
 
 
+UNSHAPED_HOP_LOG_PATH = Path(__file__).parent / "debug" / "luftlinie_debug.log"
+UNSHAPED_HOP_THRESHOLD_KM = 0.3
+
+
+def _log_unshaped_hop(router, node, next_node, node_latlon):
+    """Diagnostic for the "wilde Sprünge" (straight-line jump) investigation:
+    shape_between() returning [] is entirely normal for short, genuinely
+    straight real segments - but when it happens for a *long* hop, that
+    segment renders (and, via segment_distance()'s same fallback, gets
+    costed) as a straight line instead of the real road. Every such hop
+    above the threshold gets logged here with enough detail (node ids,
+    coordinates, whether the edge/its reverse exists in router.routing,
+    what edge_length() returns) to trace the exact missing-registration
+    spot in tile.py/osmnx_datastore.py from a real search, instead of
+    guessing further from static reading alone. Remove once root-caused."""
+    next_latlon = router.node_lat_lon(next_node)
+    straight_km = distance(node_latlon, next_latlon)
+    if straight_km < UNSHAPED_HOP_THRESHOLD_KM:
+        return
+
+    edge_length = getattr(router, "edge_length", None)
+    forward = router.routing.get(node, {})
+    backward = router.routing.get(next_node, {})
+    line = (
+        "[luftlinie-debug] {:.3f} km unshaped hop {} -> {} | "
+        "a={} b={} | edge_length={} | "
+        "forward_weight={} backward_weight={}\n"
+    ).format(
+        straight_km, node, next_node, node_latlon, next_latlon,
+        edge_length(node, next_node) if edge_length else "n/a",
+        forward.get(next_node, "<missing>"),
+        backward.get(node, "<missing>"),
+    )
+    print(line, end="")
+    try:
+        UNSHAPED_HOP_LOG_PATH.parent.mkdir(exist_ok=True)
+        with open(UNSHAPED_HOP_LOG_PATH, "a", encoding="utf8") as f:
+            f.write(line)
+    except OSError as e:
+        print("Could not write unshaped-hop debug log:", e)
+
+
 class Route(object):
     def __init__(self, route, router):
         self.route = route
@@ -47,9 +90,14 @@ class Route(object):
         shape_between = getattr(router, "shape_between", None)
         latlons = []
         for i, node in enumerate(route):
-            latlons.append(router.node_lat_lon(node))
+            node_latlon = router.node_lat_lon(node)
+            latlons.append(node_latlon)
             if shape_between and i < len(route) - 1:
-                latlons.extend(shape_between(node, route[i + 1]))
+                next_node = route[i + 1]
+                shape = shape_between(node, next_node)
+                if not shape:
+                    _log_unshaped_hop(router, node, next_node, node_latlon)
+                latlons.extend(shape)
         return latlons
 
     @staticmethod
@@ -121,7 +169,11 @@ class MyRouter(object):
         self.tiles_ids = tiles_ids
         self.progress = 100.0
         self.config = config
-        self.stored_tiles = {}
+        # Cache lives on the router/datastore (router.tile_cache), not here -
+        # see OsmnxDatastore.tile_cache for why a per-MyRouter-instance dict
+        # is unsafe (every search creates a fresh MyRouter, so a local dict
+        # here would silently drop the cache on every repeat search).
+        self.stored_tiles = router.tile_cache
         # Tiles the user has explicitly opted to allow gravel/unpaved
         # surfaces for, after a first attempt found no paved entry point.
         self.gravel_tiles = set(gravel_tiles or [])
@@ -194,20 +246,30 @@ class MyRouter(object):
         debug_export_tiles(selected_tiles)
 
         tile_ids_used = [t.uid for t in selected_tiles if isinstance(t, Tile)]
-        if len(tile_ids_used) > OR_TOOLS_TILE_THRESHOLD:
+        solver_name = "ortools" if len(tile_ids_used) > OR_TOOLS_TILE_THRESHOLD else "exact"
+        solver_start_time = time.monotonic()
+        if solver_name == "ortools":
             # Local import: avoids a circular import (ortools_router imports
             # segment_distance from this module).
             from ortools_router import solve_tile_route
             self.progress = 50.0
             waypoint_nodes = [wp.nodeId for wp in self.waypoints]
             time_limit_s = min(90, max(15, len(tile_ids_used)))
+            # Pass the already-processed Tile objects (entry points already
+            # computed above, on these exact instances) - not tile_ids_used
+            # for a fresh Tile lookup inside the solver, which used to
+            # trigger a second, independent get_entry_points() call and
+            # corrupt edge_lengths/edge_shapes (see
+            # ortools_router._tile_representative_node).
+            tiles_used = [t for t in selected_tiles if isinstance(t, Tile)]
             status, r = solve_tile_route(self.router, self.start.nodeId, self.end.nodeId,
-                                          tile_ids_used, waypoint_nodes=waypoint_nodes,
+                                          tiles_used, waypoint_nodes=waypoint_nodes,
                                           time_limit_s=time_limit_s)
         else:
             status, r = self.do_route_with_crossing_zone(self.start.nodeId, self.end.nodeId,
                                                          frozenset(selected_tiles),
                                                          self.config)
+        solver_elapsed_s = time.monotonic() - solver_start_time
         if self._exit:
             # solve_tile_route()/do_route_with_crossing_zone() are blocking
             # calls with no internal abort check, so this is the earliest
@@ -232,6 +294,9 @@ class MyRouter(object):
             self.min_length = route.length
             self._min_route = route
             print("\n**** FIND MIN ROUTE {:.2f}km ****\n".format(self.min_length))
+
+            from route_timing import record_timing
+            record_timing(solver_name, len(tile_ids_used), solver_elapsed_s)
 
         self.progress = 100.0
         print_progress_bar(100, 100)
@@ -416,7 +481,22 @@ class MyRouter(object):
         return find_routes
 
     def do_route_with_crossing_zone(self, start, end, zones, config):
-        """Do the routing"""
+        """Exact A*-like search over (current node, set of not-yet-visited
+        zones) states, exploring every entry point per zone as part of the
+        same search - see ortools_router.py's module docstring for why this
+        only scales to roughly N < 15-20 zones (2^N states) and what takes
+        over above that. The `_min_dist` closure below is the A* heuristic:
+        a flyby (straight-line, not road-network) lower bound on the
+        remaining distance through all not-yet-visited zones, memoized per
+        (start, remaining zones, end) triple in min_dists/min_dists_fast.
+
+        Unchanged from the original project implementation (long-lived,
+        proven correct for small zone counts via this session's route-jump
+        investigations) - flagged in TODO.md as structurally dense (deeply
+        nested closures, a couple of dead/commented-out debug lines) but
+        deliberately not rewritten without a concrete bug driving it, given
+        the regression risk of touching a working combinatorial search.
+        """
         _closed = {(start, frozenset(zones))}
         _queue = []
         _closeNode = True
@@ -734,9 +814,11 @@ class OrienteeringRunner(object):
         from orienteering_router import plan_orienteering_route
         from route_cleanup import remove_redundant_spurs
 
+        solver_start_time = time.monotonic()
         status, path, tiles = plan_orienteering_route(
             self.router, self.start_loc, self.visited_tiles, self.budget_km, time_limit_s=75
         )
+        solver_elapsed_s = time.monotonic() - solver_start_time
         if self._exit:
             self.error_code = ERR_ABORT_REQUEST
             return
@@ -750,10 +832,38 @@ class OrienteeringRunner(object):
         self.selected_tiles = tiles
         self._min_route = Route(path, router=self.router)
 
+        from route_timing import record_timing
+        record_timing("orienteering", self.budget_km, solver_elapsed_s)
+
+
+class _PendingRoute(object):
+    """Stands in for RouteServer.myRouter for the brief window between
+    starting a background search thread and that thread finishing enough
+    setup (OSM region preload, start/end/waypoint node resolution) to build
+    the real MyRouter - duck-types just enough of its interface
+    (progress/is_complete/error_code/error_args/min_route/abort) for
+    /route_status polling and abort() to have something valid to read
+    meanwhile, the same trick OrienteeringRunner already uses."""
+    def __init__(self):
+        self.progress = 0.0
+        self.error_code = ERR_NO
+        self.error_args = ""
+        self._complete = False
+
+    def abort(self):
+        self._complete = True
+
+    @property
+    def is_complete(self):
+        return self._complete
+
+    @property
+    def min_route(self):
+        return None
+
 
 class RouteServer(object):
     def __init__(self):
-        self.stored_tiles = {}
         self.router = None
         self.myRouter = None
         self.mode = None
@@ -775,38 +885,65 @@ class RouteServer(object):
             print("   ...OK")
         if mode != self.mode:
             self.mode = mode
-            self.stored_tiles = {}
             self.router = OsmnxDatastore(mode, cache_dir=str(Path.home().joinpath('.osmnx_cache')))
-        coord_dict = CoordDict(self.router)
 
-        # Download/cache one region up front covering start, end and every
-        # selected tile - otherwise the many small get_area/get_area_rect
-        # calls tile.get_entry_points makes per tile would each try to pull
-        # their own (possibly overlapping) region.
-        preload_points = [start_loc, end_loc] + list(waypoints)
-        for t in tiles:
-            if isinstance(t, str) and '_' in t:
-                tile = Tile(t)
-                preload_points += [(tile.latN, tile.lonW), (tile.latS, tile.lonE)]
-        self.router.preload_region(preload_points)
+        # Preloading/downloading the OSM region for tiles never searched
+        # before (e.g. the tiles highlighted as "grow your max square" -
+        # by definition areas not yet visited, often not yet searched
+        # either) can itself take minutes if osmnx has to fetch it from
+        # the Overpass API rather than hit its on-disk cache - previously
+        # this whole block ran synchronously here, before the background
+        # thread was even started, blocking the /start_route HTTP response
+        # (and therefore the entire "searching" progress display) for that
+        # whole download with zero feedback. That made searching those
+        # tiles look like it simply didn't work, when it was just an
+        # unbounded, invisible wait. Now the actual work (preload, node
+        # resolution, MyRouter construction and run) happens inside the
+        # background thread; a lightweight placeholder stands in for
+        # self.myRouter until that thread gets far enough to build the
+        # real one.
+        def prepare_and_run(pending):
+            coord_dict = CoordDict(self.router)
 
-        start_point = coord_dict.get(*start_loc)
-        end_point = coord_dict.get(*end_loc)
-        ways_points = [coord_dict.get(*wp) for wp in waypoints]
-        print("Ways_points")
-        print(ways_points)
+            # Download/cache one region up front covering start, end and
+            # every selected tile - otherwise the many small
+            # get_area/get_area_rect calls tile.get_entry_points makes per
+            # tile would each try to pull their own (possibly overlapping)
+            # region.
+            preload_points = [start_loc, end_loc] + list(waypoints)
+            for t in tiles:
+                if isinstance(t, str) and '_' in t:
+                    tile = Tile(t)
+                    preload_points += [(tile.latN, tile.lonW), (tile.latS, tile.lonE)]
+            self.router.preload_region(preload_points)
 
-        self.myRouter = MyRouter(self.router, start_point, end_point, tiles, ways_points, config,
-                                  gravel_tiles=gravel_tiles)
+            start_point = coord_dict.get(*start_loc)
+            end_point = coord_dict.get(*end_loc)
+            ways_points = [coord_dict.get(*wp) for wp in waypoints]
+            print("Ways_points")
+            print(ways_points)
+
+            real_router = MyRouter(self.router, start_point, end_point, tiles, ways_points, config,
+                                    gravel_tiles=gravel_tiles)
+            if pending is not None and self.myRouter is not pending:
+                # A newer search (or an abort+retry) already replaced
+                # self.myRouter while this one was still preloading -
+                # don't clobber it with a stale result.
+                return
+            self.myRouter = real_router
+            real_router.run()
+
         if thread:
-            self.thread = threading.Thread(target=self.myRouter.run)
+            pending = _PendingRoute()
+            self.myRouter = pending
+            self.thread = threading.Thread(target=prepare_and_run, args=(pending,))
             # Background thread will finish with the main program
             self.thread.setDaemon(True)
             # Start YourLedRoutine() in a separate thread
             self.thread.start()
 
         else:
-            self.myRouter.run()
+            prepare_and_run(None)
 
         return self.myRouter, self.is_complete, self.route
 
@@ -824,7 +961,6 @@ class RouteServer(object):
             print("   ...OK")
         if mode != self.mode:
             self.mode = mode
-            self.stored_tiles = {}
             self.router = OsmnxDatastore(mode, cache_dir=str(Path.home().joinpath('.osmnx_cache')))
 
         self.myRouter = OrienteeringRunner(self.router, start_loc, visited_tiles, budget_km)

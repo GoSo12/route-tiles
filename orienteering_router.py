@@ -86,16 +86,20 @@ def _generate_candidates(start_loc, visited_tiles, budget_km, max_candidates=150
     return {tid: prize for tid, (prize, _) in ranked[:max_candidates]}
 
 
-def solve_orienteering_route(datastore, start_node, end_node, candidates, budget_km, time_limit_s=60):
-    """candidates: {tile_id: prize}. Finds a route from start_node to
-    end_node visiting whichever subset of candidate tiles maximizes total
-    collected prize, subject to total route length <= budget_km.
+def solve_orienteering_route(datastore, start_node, end_node, candidates, tile_points,
+                              budget_km, time_limit_s=60):
+    """candidates: {tile_id: prize}. tile_points: {tile_id: Tile}, already
+    processed (tile.get_entry_points(datastore) already called by the
+    caller - see ortools_router._tile_representative_node for why this
+    must not be redone here). Finds a route from start_node to end_node
+    visiting whichever subset of candidate tiles maximizes total collected
+    prize, subject to total route length <= budget_km.
 
     Returns (status, node_path, visited_tile_ids).
     """
     tile_ids = list(candidates.keys())
     landmarks = [start_node, end_node] + [
-        _tile_representative_node(datastore, t) for t in tile_ids
+        _tile_representative_node(tile_points[t]) for t in tile_ids
     ]
     n = len(landmarks)
     cost_graph = _cost_graph(datastore)
@@ -176,7 +180,16 @@ def plan_orienteering_route(datastore, start_loc, visited_tiles, budget_km, time
     """
     candidates = _generate_candidates(start_loc, visited_tiles, budget_km)
 
-    tile_points = {t: Tile(t) for t in candidates}
+    # Reuse/populate datastore.tile_cache (not a fresh Tile() per call) -
+    # a repeat search in the same session would otherwise re-run
+    # get_entry_points() on an already-split graph and corrupt
+    # edge_lengths/edge_shapes for tiles processed before (see
+    # OsmnxDatastore.tile_cache).
+    tile_points = {}
+    for t in candidates:
+        if t not in datastore.tile_cache:
+            datastore.tile_cache[t] = Tile(t)
+        tile_points[t] = datastore.tile_cache[t]
     datastore.preload_region(
         [start_loc] + [(t.lat, t.lon) for t in tile_points.values()],
         margin_km=3,
@@ -195,5 +208,5 @@ def plan_orienteering_route(datastore, start_loc, visited_tiles, budget_km, time
 
     start_node = datastore.find_node(*start_loc)
     return solve_orienteering_route(
-        datastore, start_node, start_node, candidates, budget_km, time_limit_s
+        datastore, start_node, start_node, candidates, tile_points, budget_km, time_limit_s
     )

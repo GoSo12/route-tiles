@@ -10,11 +10,12 @@
 
     <!--<link rel="shortcut icon" type="image/x-icon" href="docs/images/favicon.ico" />-->
 
-    <link crossorigin="" href="https://unpkg.com/leaflet@1.6.0/dist/leaflet.css"
-          integrity="sha512-xwE/Az9zrjBIphAcBb3F6JVqxf46+CDLwfLMHloNu6KEQCAWi6HcDUbeOfBIptF7tcCzusKFjFw2yuvEpDL9wQ=="
+    <link crossorigin="" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha512-Zcn6bjR/8RZbLEpLIeOwNtzREBAJnUKESxces60Mpoj+2okopSAcSUIUOseddDm0cxnGQzxIR7vJgsLZbdLE3w=="
           rel="stylesheet"/>
 
-    <link crossorigin="anonymous" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <link crossorigin="anonymous" integrity="sha512-rt/SrQ4UNIaGfDyEXZtNcyWvQeOq0QLygHluFQcSjaGB04IxWhal71tKuzP6K8eYXYB6vJV4pHkXcmFGGQ1/0w=="
+          href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.6.2/css/bootstrap.min.css" rel="stylesheet">
 
     <link rel="stylesheet" href="leaflet-extra-markers/css/leaflet.extra-markers.min.css">
 
@@ -23,16 +24,19 @@
     <link href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@600;700&display=swap" rel="stylesheet">
 
     <script crossorigin=""
-            integrity="sha512-gZwIG9x3wUXg2hdXF6+rVkLF/0Vi9U8D2Ntg4Ga5I5BZpVkVxlJWbSQtXPSiUTtC0TjtGOmxa1AJPuV0CPthew=="
-            src="https://unpkg.com/leaflet@1.6.0/dist/leaflet.js"></script>
-    <script crossorigin="anonymous" integrity="sha256-CSXorXvZcTkaix6Yvo6HppcZGetbYMGWSFlBw8HfCJo="
-            src="https://code.jquery.com/jquery-3.4.1.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.i18n/1.0.7/jquery.i18n.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.i18n/1.0.7/jquery.i18n.messagestore.min.js"></script>
+            integrity="sha512-BwHfrr4c9kmRkLw6iXFdzcdWV/PGkVgiIyIWLLlTSXzWQzxuSg4DiQUCpauz/EWjgk5TYQqX/kvn9pG1NpYfqg=="
+            src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script crossorigin="anonymous" integrity="sha512-v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g=="
+            src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script crossorigin="anonymous" integrity="sha512-EkS8Kq86l7dHt/dOBniHgtYvAScDqFw/lIPX5VCwaVKsufs0pY44I2cguqZ45QaFOGGwVd3T1nXvVJYIEjRsjA=="
+            src="https://cdnjs.cloudflare.com/ajax/libs/jquery.i18n/1.0.9/jquery.i18n.min.js"></script>
+    <script crossorigin="anonymous" integrity="sha512-Ejnbo8F6SIU18Tj9hZyJzVbhWtbC40Fyvuyfs6InZloy043xEvICul37BxuUGZG1ia8RQky7uBOwBdLsGKDu1w=="
+            src="https://cdnjs.cloudflare.com/ajax/libs/jquery.i18n/1.0.9/jquery.i18n.messagestore.min.js"></script>
 
-    <script crossorigin="anonymous" integrity="sha384-Q6E9RHvbIyZFJoft+2mJbHaEWldlvI9IOYy5n3zV9zzTtmI3UksdQRVvoxMfooAo"
-            src="https://cdn.jsdelivr.net/npm/popper.js@1.16.0/dist/umd/popper.min.js"></script>
-    <script crossorigin="anonymous" src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script crossorigin="anonymous" integrity="sha512-ubuT8Z88WxezgSqf3RLuNi5lmjstiJcyezx34yIU2gAHonIi27Na7atqzUZCOoY4CExaoFumzOsFQ2Ch+I/HCw=="
+            src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
+    <script crossorigin="anonymous" integrity="sha512-7rusk8kGPFynZWu26OKbTeI+QPoYchtxsmPeBqkHIEXJxeun4yJ4ISYe7C6sz9wdxeE1Gk3VxsIWgCZTc+vX3g=="
+            src="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.6.2/js/bootstrap.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bs-custom-file-input/dist/bs-custom-file-input.min.js"></script>
 
     <script src='//api.tiles.mapbox.com/mapbox.js/plugins/leaflet-omnivore/v0.3.1/leaflet-omnivore.min.js'></script>
@@ -55,6 +59,8 @@
             --accent-ink: #FFFFFF;
             --accent-soft: #DCEDEA;
             --danger: #B33F32;
+            --marker-start: #2F8F4E;
+            --marker-end: #C97A1F;
             --shadow: 0 1px 2px rgba(29,43,39,0.06), 0 4px 14px rgba(29,43,39,0.06);
         }
 
@@ -178,10 +184,106 @@
             background-color: var(--accent);
         }
 
+        #mapBottomOverlay {
+            position: absolute;
+            left: 0; right: 0; bottom: 0;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            padding-bottom: 4px;
+            pointer-events: none;
+        }
+        #mapBottomOverlay > * {
+            pointer-events: auto;
+        }
+        #mapActionBar {
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            box-shadow: var(--shadow);
+            padding: 10px 14px;
+            width: min(460px, 92vw);
+        }
+        #mapActionBar #run-button-group .btn {
+            font-size: 0.82rem;
+            padding: 7px 8px;
+            white-space: nowrap;
+        }
+
         #mapLegend {
             border-radius: 10px 10px 0 0 !important;
             box-shadow: var(--shadow);
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        #mapNavControl {
+            position: absolute;
+            top: 74px; left: 10px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .map-nav-btn {
+            width: 34px; height: 34px;
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            box-shadow: var(--shadow);
+            display: grid;
+            place-items: center;
+            color: var(--ink);
+            cursor: pointer;
+            padding: 0;
+        }
+        .map-nav-btn:hover {
+            background: var(--surface-2);
+        }
+
+        #mapVisibilityControl {
+            position: absolute;
+            top: 14px; right: 14px;
+            z-index: 1000;
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            box-shadow: var(--shadow);
+            padding: 8px 12px;
+            font-size: 0.85rem;
+        }
+        #mapVisibilityControl .form-check {
+            white-space: nowrap;
+        }
+
+        #bStart, #bEnd {
+            transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+        }
+        #bStart.marker-set {
+            background-color: var(--marker-start);
+            border-color: var(--marker-start);
+            color: #fff;
+        }
+        #bEnd.marker-set {
+            background-color: var(--marker-end);
+            border-color: var(--marker-end);
+            color: #fff;
+        }
+        .roundtrip-hint {
+            font-size: 0.78em;
+            opacity: 0.75;
+            margin-left: 4px;
+        }
+
+        /* Bootstrap's .row applies negative left/right margins (to cancel
+           its children's .col-* gutter padding), which makes a .form-group.row
+           extend further right than a plain sibling .form-control in the
+           same .card-body (e.g. #statshunters_url) - neutralize that here so
+           both align on the same right edge. */
+        .card-body .form-group.row {
+            margin-left: 0;
+            margin-right: 0;
         }
 
     </style>
@@ -194,78 +296,121 @@
     <div class="row pmap">
         <div class="col-md-8 pmap">
             <div id="mapid">
-                <div id="mapLegend" style="position: absolute; bottom: 0; left: 0; right: 0; z-index: 1000; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 14px; padding: 6px 10px; font-size: 0.8em; background: rgba(255,255,255,0.9); border-top: 1px solid #ccc;">
-                    <span><span style="display:inline-block;width:11px;height:11px;background:green;opacity:0.6;vertical-align:middle;"></span> Besucht</span>
-                    <span><span style="display:inline-block;width:11px;height:11px;border:1px solid red;vertical-align:middle;"></span> Nicht besucht</span>
-                    <span><span style="display:inline-block;width:11px;height:11px;background:orange;vertical-align:middle;"></span> Cluster-Potenzial</span>
-                    <span><span style="display:inline-block;width:11px;height:11px;background:purple;vertical-align:middle;"></span> Max-Square-Ziel</span>
-                    <span><span style="display:inline-block;width:11px;height:11px;background:saddlebrown;vertical-align:middle;"></span> Schotter akzeptiert</span>
-                    <span><span style="display:inline-block;width:14px;height:2px;background:red;vertical-align:middle;"></span> Berechnete Route</span>
-                    <span><span style="display:inline-block;width:14px;height:2px;background:#20ff20;vertical-align:middle;"></span> Cluster-Umriss</span>
-                    <span><span style="display:inline-block;width:14px;height:2px;background:#2020FF;vertical-align:middle;"></span> Max-Square-Umriss</span>
+              <div id="mapNavControl">
+                <button class="map-nav-btn" id="btnLocateMe" title="Meinen Standort anzeigen" data-i18n="[title]msg-btn-locate-me-title" type="button">
+                    <i class="fas fa-crosshairs"></i>
+                </button>
+                <button class="map-nav-btn" id="btnJumpToMaxSquare" title="Zum größten Quadrat springen" data-i18n="[title]msg-btn-jump-maxsquare-title" type="button">
+                    <i class="fas fa-vector-square"></i>
+                </button>
+              </div>
+              <div id="mapVisibilityControl">
+                <div class="form-check">
+                  <input class="form-check-input config-storage" type="checkbox" value="" id="showVisitedTiles" checked>
+                  <label class="form-check-label" for="showVisitedTiles" data-i18n="msg-show-visited-tiles">Show visited tiles</label>
                 </div>
+                <div class="form-check">
+                  <input class="form-check-input config-storage" type="checkbox" value="" id="showMaxSquare">
+                  <label class="form-check-label" for="showMaxSquare" data-i18n="msg-show-max-square">Show max square</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input config-storage" type="checkbox" value="" id="showCluster">
+                  <label class="form-check-label" for="showCluster" data-i18n="msg-show-cluster">Show cluster</label>
+                </div>
+              </div>
+              <div id="mapBottomOverlay">
+                <div id="mapActionBar">
+                    <div aria-label="Route actions" class="btn-group" id="run-button-group" role="group">
+                        <button class="btn btn-outline-secondary" id="clear-tiles"
+                                type="button"><span data-i18n="message-clear-tiles-button">Clear tiles</span>
+                            & <i class="fas fa-map-marker-alt"></i>
+                        </button>
+                        <button class="btn btn-outline-primary" id="bPlanRoute" type="button" data-i18n="msg-plan-route-button">Route planen</button>
+                        <button class="btn btn-outline-danger" disabled id="bAbortRoute" type="button" data-i18n="msg-abort-button">Abbrechen</button>
+                    </div>
+
+                    <div class="progress mt-2" style="height:8px;">
+                        <div class="progress-bar" id="routeProgressBar" role="progressbar" style="width:0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                    </div>
+
+                    <div class="alert alert-light mt-2 mb-0" id="progress-message">
+                        <div id="spinner-searching" class="spinner-border spinner-border-sm text-primary" role="status" style="display:none;">
+                            <span class="sr-only">Searching...</span>
+                        </div>
+                        <span id="message"></span>
+                        <span class="badge badge-light" style="float:right;" id="length"></span>
+                    </div>
+
+                    <div id="gpxMessage" class="alert alert-danger">
+                        test
+                    </div>
+                    <a class="d-none btn btn-info" download href="" id="gpxDownload">Télécharger</a>
+                </div>
+                <div id="mapLegend" style="display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 14px; padding: 6px 10px; font-size: 0.8em; background: rgba(255,255,255,0.9); border-top: 1px solid #ccc;">
+                    <span><span style="display:inline-block;width:11px;height:11px;background:green;opacity:0.6;vertical-align:middle;"></span> <span data-i18n="msg-legend-visited">Besucht</span></span>
+                    <span><span style="display:inline-block;width:11px;height:11px;border:1px solid red;vertical-align:middle;"></span> <span data-i18n="msg-legend-not-visited">Nicht besucht</span></span>
+                    <span><span style="display:inline-block;width:11px;height:11px;background:purple;vertical-align:middle;"></span> <span data-i18n="msg-legend-maxsquare-target">Max-Square-Ziel</span></span>
+                    <span><span style="display:inline-block;width:11px;height:11px;background:saddlebrown;vertical-align:middle;"></span> <span data-i18n="msg-legend-gravel-accepted">Schotter akzeptiert</span></span>
+                    <span><span style="display:inline-block;width:14px;height:2px;background:red;vertical-align:middle;"></span> <span data-i18n="msg-legend-computed-route">Berechnete Route</span></span>
+                    <span><span style="display:inline-block;width:14px;height:2px;background:#FF8C00;vertical-align:middle;"></span> <span data-i18n="msg-legend-cluster-outline">Cluster-Umriss</span></span>
+                    <span><span style="display:inline-block;width:14px;height:2px;background:#2020FF;vertical-align:middle;"></span> <span data-i18n="msg-legend-maxsquare-outline">Max-Square-Umriss</span></span>
+                </div>
+              </div>
             </div>
         </div>
         <div class="col-md-4 pmap" style="overflow-y:auto">
 
-            <div class="form-group row" style="margin-top:8px;">
-                <label for="switch-locale" class="col-sm-8 col-form-label" data-i18n="msg-config-language"></label>
-                <select id="switch-locale" class="col-sm-4 form-control">
-                    <option data-locale="en" href="#">English</option>
-                    <option data-locale="fr" href="#">Français</option>
-                </select>
+            <div class="form-group row align-items-center" style="margin-top:8px;">
+                <label for="switch-locale" class="col-sm-2 col-form-label" data-i18n="msg-config-language"></label>
+                <div class="col-sm-4">
+                    <select id="switch-locale" class="form-control">
+                        <option data-locale="en" href="#">English</option>
+                        <option data-locale="fr" href="#">Français</option>
+                        <option data-locale="de" href="#">Deutsch</option>
+                    </select>
+                </div>
+                <label for="bDemoModeToggle" class="col-sm-2 col-form-label" data-i18n="msg-load-demo-data"></label>
+                <div class="col-sm-4">
+                    <div class="custom-control custom-switch">
+                        <input type="checkbox" class="custom-control-input" id="bDemoModeToggle">
+                        <label class="custom-control-label" for="bDemoModeToggle"></label>
+                    </div>
+                </div>
             </div>
 
             <!-- Kartendaten -->
             <div class="card mb-3">
                 <div class="card-header py-2">
-                    <h3 aria-expanded="true" data-target="#card-mapdata" data-toggle="collapse">Kartendaten</h3>
+                    <h3 aria-expanded="true" data-target="#card-mapdata" data-toggle="collapse"><span data-i18n="msg-panel-mapdata">Kartendaten</span></h3>
                 </div>
                 <div class="collapse show card-body" id="card-mapdata">
                     <div>
                         <span data-i18n="msg-import-statshunters-message"></span>
                         <a href="https://statshunters.com/share">statshunters.com</a>
                     </div>
-                    <input id="statshunters_url" class="form-control config-storage" name="statshunters_url" type="text"/>
+                    <input id="statshunters_url" class="form-control config-storage" name="statshunters_url" type="text" placeholder="https://statshunters.com/share/abcdef123456/"/>
                     <button class="btn btn-primary" id="bImportStatsHunters"
                             data-i18n="msg-import-statshunters"></button>
                     <button class="btn btn-outline-danger" id="bImportStatsHuntersReset">
                         <i class="fas fa-trash-alt"></i>
                     </button>
-                    <div>
-                        <span data-i18n="msg-import-statshunters-filter-message">Filter to apply on activities</span>
-                    </div>
-                    <input id="statshunters_filter" class="form-control config-storage" name="statshunters_filter" type="text"/>
+                    <div id="statshuntersStatus" class="small text-muted mt-1" style="display:none;"></div>
 
-                    <div class="form-check">
-                      <input class="form-check-input config-storage" type="checkbox" value="" id="showVisitedTiles" checked>
-                      <label class="form-check-label" for="showVisitedTiles">Show visited tiles</label>
-                    </div>
-                    <div class="form-check">
-                      <input class="form-check-input config-storage" type="checkbox" value="" id="showMaxSquare">
-                      <label class="form-check-label" for="showMaxSquare" data-i18n="msg-show-max-square">Show max square</label>
-                    </div>
-                    <div class="form-check">
-                      <input class="form-check-input config-storage" type="checkbox" value="" id="showCluster">
-                      <label class="form-check-label" for="showCluster" data-i18n="msg-show-cluster">Show cluster</label>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="tileScoreMode">Tile potential</label>
-                        <select class="form-control" id="tileScoreMode">
-                            <option value="none">None</option>
-                            <option value="maxSquare">Max square growth</option>
-                            <option value="cluster">Cluster growth</option>
+                    <div class="form-group row mt-2">
+                        <label for="statshunters_filter_types" class="col-sm-5 col-form-label" data-i18n="msg-activity-type-label">Aktivitätstyp</label>
+                        <select id="statshunters_filter_types" class="col-sm-7 form-control">
+                            <option value="" data-i18n="msg-activity-type-all">Alle Typen</option>
                         </select>
-                        <small id="maxSquareCompletionInfo" class="form-text text-muted"></small>
                     </div>
+
+                    <small id="maxSquareCompletionInfo" class="form-text text-muted"></small>
                 </div>
             </div>
 
             <!-- Fortbewegung & Route -->
             <div class="card mb-3">
                 <div class="card-header py-2">
-                    <h3 aria-expanded="true" data-target="#card-transport" data-toggle="collapse">Fortbewegung &amp; Route</h3>
+                    <h3 aria-expanded="true" data-target="#card-transport" data-toggle="collapse"><span data-i18n="msg-panel-transport">Fortbewegung &amp; Route</span></h3>
                 </div>
                 <div class="collapse show card-body" id="card-transport">
                     <div class="form-group row">
@@ -291,92 +436,45 @@
                         </select>
                     </div>
 
-                    <div aria-label="Starting point" class="btn-group" role="group">
-                        <button class="btn btn-primary" data-i18n="message-start-button" id="bStart">Start
-                        </button>
-                        <!--input type="text" id="start" name="start" /-->
-                        <button class="btn btn-danger" id="bClearStart">
-                            <i class="fas fa-trash-alt"></i>
-                        </button>
-                    </div>
+                    <button class="btn btn-outline-primary" id="bStart">
+                        <span data-i18n="message-start-button">Start</span><span class="marker-badge" id="bStartBadge"></span>
+                    </button>
                     <button class="btn btn-primary" id="bRevert">
                         <i class="fas fa-exchange-alt"></i>
                     </button>
-                    <div aria-label="Ending point" class="btn-group" role="group">
-                        <button class="btn btn-primary" data-i18n="message-end-button" id="bEnd">End</button>
-                        <!--input type="text" id="end" name="end" /-->
-                        <button class="btn btn-danger" id="bClearEnd">
-                            <i class="fas fa-trash-alt"></i>
-                        </button>
-                    </div>
+                    <button class="btn btn-outline-primary" id="bEnd">
+                        <span data-i18n="message-end-button">End</span><span class="marker-badge" id="bEndBadge"></span><span class="roundtrip-hint" id="bEndRoundtripHint" data-i18n="msg-roundtrip-hint">(= Rundtour)</span>
+                    </button>
                     <button class="btn btn-primary" id="addWaypoint">
                         <i class="fas fa-plus"></i>
                         <i class="fas fa-map-marker-alt"></i>
                     </button>
-
-                    <div class="form-group row" style="margin-top:10px;">
-                        <div class="custom-control custom-switch col-form-label col-sm-8">
-                            <input type="checkbox" class="custom-control-input config-storage" id="is-draw-circle">
-                            <label class="custom-control-label" for="is-draw-circle" data-i18n="message-draw-circle"></label>
-                        </div>
-                        <input type="number" class="col-sm-2 form-control-range config-storage" min="1" max="500" step="1" id="circle-size">
-                        &nbsp;km
-                    </div>
                 </div>
             </div>
 
             <!-- Ziel: Kacheln wählen -->
             <div class="card mb-3">
                 <div class="card-header py-2">
-                    <h3 aria-expanded="true" data-target="#card-target" data-toggle="collapse">Ziel: Kacheln wählen</h3>
+                    <h3 aria-expanded="true" data-target="#card-target" data-toggle="collapse"><span data-i18n="msg-panel-target">Ziel: Kacheln wählen</span></h3>
                 </div>
                 <div class="collapse show card-body" id="card-target">
                     <div class="btn-group btn-group-toggle btn-block" data-toggle="buttons" role="group" aria-label="Auswahl-Modus">
                         <label class="btn btn-outline-primary active">
-                            <input checked id="routingModeManual" name="routingMode" type="radio" value="manual"> Manuell
+                            <input checked id="routingModeManual" name="routingMode" type="radio" value="manual"> <span data-i18n="msg-mode-manual">Manuell</span>
                         </label>
                         <label class="btn btn-outline-primary">
-                            <input id="routingModeBudget" name="routingMode" type="radio" value="budget"> Streckenvorgabe
+                            <input id="routingModeBudget" name="routingMode" type="radio" value="budget"> <span data-i18n="msg-mode-budget">Streckenvorgabe</span>
                         </label>
                     </div>
 
                     <div id="manualModeControls" class="mt-2">
-                        <small class="form-text text-muted"><span id="selectedTileCount">0</span> Kacheln ausgewählt</small>
+                        <small class="form-text text-muted"><span id="selectedTileCount">0</span> <span data-i18n="msg-tiles-selected-suffix">Kacheln ausgewählt</span> · <span id="selectedTileSolverLabel" class="font-weight-bold"></span></small>
                     </div>
 
                     <div id="budgetModeControls" class="mt-2" style="display:none;">
-                        <label for="budgetKm">Ziel-Streckenlänge (km)</label>
+                        <label for="budgetKm" data-i18n="msg-budget-km-label">Ziel-Streckenlänge (km)</label>
                         <input class="form-control" id="budgetKm" min="1" type="number" value="30">
                     </div>
-
-                    <div aria-label="Route actions" class="btn-group mt-3" id="run-button-group" role="group">
-                        <button class="btn btn-outline-secondary" id="clear-tiles"
-                                type="button"><span data-i18n="message-clear-tiles-button">Clear tiles</span>
-                            & <i class="fas fa-map-marker-alt"></i>
-                        </button>
-                        <button class="btn btn-primary" id="bPlanRoute" type="button">Route planen</button>
-                        <button class="btn btn-outline-danger" disabled id="bAbortRoute" type="button">Abbrechen</button>
-                    </div>
-
-                    <div class="progress mt-3" style="height:8px;">
-                        <div class="progress-bar" id="routeProgressBar" role="progressbar" style="width:0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
-                    </div>
-
-                    <div class="alert alert-light mt-2" id="progress-message">
-                        <button class="btn btn-primary" id="button-download-route">
-                            <i class="fas fa-cloud-download-alt"></i>
-                        </button>
-                        <div id="spinner-searching" class="spinner-border spinner-border-sm text-primary" role="status" style="display:none;">
-                            <span class="sr-only">Searching...</span>
-                        </div>
-                        <span id="message"></span>
-                        <span class="badge badge-light" style="float:right;" id="length"></span>
-                    </div>
-
-                    <div id="gpxMessage" class="alert alert-danger">
-                        test
-                    </div>
-                    <a class="d-none btn btn-info" download href="" id="gpxDownload">Télécharger</a>
                 </div>
             </div>
 
@@ -387,6 +485,15 @@
                 </div>
 
                 <div class="collapse card-body" id="section-routes">
+                    <div class="form-group row align-items-center">
+                        <label class="col-sm-8 col-form-label mb-0" data-i18n="msg-download-computed-route">Berechnete Route herunterladen</label>
+                        <div class="col-sm-4">
+                            <button class="btn btn-outline-primary btn-block" id="button-download-route">
+                                <i class="fas fa-cloud-download-alt"></i>
+                            </button>
+                        </div>
+                    </div>
+
                     <div class="form-group row">
                         <label for="traceName" class="col-form-label col-sm-4" data-i18n="msg-route-name">Name</label>
                         <input id="traceName" class="form-control col-sm-6 config-storage" name="traceName" type="text"/>
@@ -398,7 +505,7 @@
                     </div>
 
                     <div class="form-group row" id="filter-form">
-                        <b>Routes:</b>
+                        <b data-i18n="msg-routes-label">Routes:</b>
                         <div class="custom-control custom-switch col-form-label">
                             <input type="checkbox" class="custom-control-input config-storage" id="filter-activated">
                             <label class="custom-control-label" for="filter-activated" data-i18n="msg-input-filter">Filter</label>
@@ -458,15 +565,15 @@
     <div class="modal-dialog" role="document">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Kachel ohne befestigte Straße</h5>
+                <h5 class="modal-title" data-i18n="msg-gravel-modal-title">Kachel ohne befestigte Straße</h5>
             </div>
             <div class="modal-body">
                 <p id="gravelModalText"></p>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" id="gravelModalCancel">Abbrechen</button>
-                <button type="button" class="btn btn-outline-danger" id="gravelModalRemove">Kachel entfernen</button>
-                <button type="button" class="btn btn-primary" id="gravelModalAccept">Schotter zulassen</button>
+                <button type="button" class="btn btn-secondary" id="gravelModalCancel" data-i18n="msg-abort-button">Abbrechen</button>
+                <button type="button" class="btn btn-outline-danger" id="gravelModalRemove" data-i18n="msg-gravel-modal-remove">Kachel entfernen</button>
+                <button type="button" class="btn btn-primary" id="gravelModalAccept" data-i18n="msg-gravel-modal-accept">Schotter zulassen</button>
             </div>
         </div>
     </div>

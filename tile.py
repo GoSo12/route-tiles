@@ -267,9 +267,6 @@ class Tile(ZoneWithEntries):
                             if edge_lengths is not None and original_length is not None:
                                 edge_lengths[pair] = original_length * (b_frac - a_frac)
 
-                    if node_a not in router.not_update_routing:
-                        router.not_update_routing[node_a] = []
-                    router.not_update_routing[node_a].append(node_b)
                     n0 = node_a
                     for n in nodes_id:
                         router.routing[n0][n] = weight
@@ -282,29 +279,20 @@ class Tile(ZoneWithEntries):
 
 
 def tiles_to_kml(tiles, filename, name):
-    # Create the root KML object
-    k = kml.KML()
     ns = '{http://www.opengis.net/kml/2.2}'
+    style = styles.Style(id="s", styles=[styles.LineStyle(color="ff0000ff", width=1)])
 
-    s = styles.Style(id="s", styles=[styles.LineStyle(color="ff0000ff", width=1)])
+    placemarks = [
+        kml.Placemark(ns=ns, name=tile_id, style_url=styles.StyleUrl(url="#s"),
+                      geometry=Tile(tile_id).line_string_lon_lat)
+        for tile_id in tiles
+    ]
+    folder = kml.Folder(ns=ns, name=name, features=placemarks)
+    document = kml.Document(ns=ns, name=name, styles=[style], features=[folder])
+    k = kml.KML(ns=ns, features=[document])
 
-    # Create a KML Document and add it to the KML root object
-    d = kml.Document(ns, name=name, styles=[s])
-    k.append(d)
-
-    # Create a KML Folder and add it to the Document
-    f = kml.Folder(ns, name=name)
-    d.append(f)
-
-    # Create a Placemark with a simple polygon geometry and add it to the
-    # second folder of the Document
-    for tile_id in tiles:
-        tile = Tile(tile_id)
-        p = kml.Placemark(ns, tile_id, styleUrl="#s")
-        p.geometry = tile.line_string_lon_lat
-        f.append(p)
-
-    print(k.to_string(prettyprint=True))
+    output = k.to_string(prettyprint=True)
+    print(output)
     with open(filename, 'w') as hf:
-        hf.write(k.to_string(prettyprint=True))
+        hf.write(output)
     return True

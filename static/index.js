@@ -38,7 +38,8 @@ $(document).ready(function(){
 
     $.i18n(/*{locale:'en'}*/).load({
         'en': 'i18n/en.json',
-        'fr': 'i18n/fr.json'
+        'fr': 'i18n/fr.json',
+        'de': 'i18n/de.json'
     }).done( function(){
         let storage_locale = localStorage.getItem('locale')
         if (storage_locale) {
@@ -113,6 +114,42 @@ $(document).ready(function(){
         var routePolyline = false;
         var actualTrace = false;
 
+        // Our custom floating controls (#mapBottomOverlay incl. the action
+        // bar/legend, #mapVisibilityControl) live inside #mapid alongside
+        // Leaflet's own panes, so a click on one of their buttons/checkboxes
+        // still bubbles up through #mapid afterwards - Leaflet's own map
+        // click handler (tile select/deselect further below) would then
+        // fire too, toggling whatever tile happens to be at that screen
+        // position. L.DomEvent.disableClickPropagation() is the standard
+        // Leaflet fix for exactly this (same mechanism its own built-in
+        // controls use).
+        L.DomEvent.disableClickPropagation(document.getElementById('mapBottomOverlay'));
+        L.DomEvent.disableClickPropagation(document.getElementById('mapVisibilityControl'));
+        L.DomEvent.disableClickPropagation(document.getElementById('mapNavControl'));
+
+        $('#btnLocateMe').on('click', function () {
+            if (!navigator.geolocation) {
+                alert($.i18n('msg-geolocation-unsupported'));
+                return;
+            }
+            navigator.geolocation.getCurrentPosition(function (pos) {
+                mymap.setView([pos.coords.latitude, pos.coords.longitude], 14);
+            }, function (err) {
+                alert($.i18n('msg-geolocation-failed', err.message));
+            });
+        });
+
+        $('#btnJumpToMaxSquare').on('click', function () {
+            // maxSquareLayer is populated by statshunters_request() further
+            // below (still in scope here - both are top-level vars in this
+            // same $(document).ready() closure).
+            if (maxSquareLayer && maxSquareLayer.getBounds && maxSquareLayer.getBounds().isValid()) {
+                mymap.fitBounds(maxSquareLayer.getBounds());
+            } else {
+                alert($.i18n('msg-no-maxsquare-yet'));
+            }
+        });
+
         var tilesLayerGroup = L.layerGroup().addTo(mymap);
 
         function TileFromCoord(lat, lon) {
@@ -155,11 +192,41 @@ $(document).ready(function(){
 
         var maxSquareCompletionTiles = []
         var maxSquareCompletionInfo = false
-        var clusterScores = {}
-        var clusterScoresMax = 1
 
         function updateSelectedTileCount() {
             $('#selectedTileCount').text(selected_tiles.length);
+            let tileCount = selected_tiles.length + waypoints.length;
+            let solverKey = tileCount > OR_TOOLS_TILE_THRESHOLD ? 'msg-solver-turbo' : 'msg-solver-exact';
+            $('#selectedTileSolverLabel').text($.i18n(solverKey));
+        }
+
+        function getActivityFilterParams() {
+            // Fixed dropdown value populated from activity_filter_options()
+            // after import - never free-form text (see statshunters.py).
+            return {
+                type: $('#statshunters_filter_types').val() || ''
+            };
+        }
+
+        function setStatshuntersStatus(state, text) {
+            $('#statshuntersStatus')
+                .removeClass('text-muted text-success text-danger')
+                .addClass(state === 'error' ? 'text-danger' : (state === 'ok' ? 'text-success' : 'text-muted'))
+                .text(text)
+                .show();
+        }
+
+        function populateActivityFilterOptions(filterOptions) {
+            if (!filterOptions) return;
+            let typesSelect = $('#statshunters_filter_types');
+            let previouslySelected = typesSelect.val();
+            typesSelect.empty().append($('<option>').val('').text($.i18n('msg-activity-type-all')));
+            filterOptions.types.forEach(function (type) {
+                typesSelect.append($('<option>').val(type).text(type));
+            });
+            if (previouslySelected && filterOptions.types.includes(previouslySelected)) {
+                typesSelect.val(previouslySelected);
+            }
         }
 
 
@@ -189,21 +256,14 @@ $(document).ready(function(){
                             } else {
                                 color = 'red';
                                 weight = 1.0;
-                                let scoreMode = $('#tileScoreMode').val();
-                                if (scoreMode === 'maxSquare') {
-                                    if (maxSquareCompletionTiles.includes(tile_id)) {
-                                        color = 'purple';
-                                        weight = 1.0;
-                                        opacity = 0.6;
-                                    }
-                                } else if (scoreMode === 'cluster') {
-                                    let score = clusterScores[tile_id] || 0;
-                                    if (score > 0) {
-                                        color = 'orange';
-                                        weight = 0.5;
-                                        let ratio = Math.log(score + 1) / Math.log(clusterScoresMax + 1);
-                                        opacity = 0.15 + 0.65 * Math.min(ratio, 1);
-                                    }
+                                if (maxSquareCompletionTiles.includes(tile_id)) {
+                                    // Always shown, not tied to any selection - this is
+                                    // the one remaining "which tiles are worth riding
+                                    // for" hint (fewest tiles needed for the next
+                                    // bigger max square).
+                                    color = 'purple';
+                                    weight = 1.0;
+                                    opacity = 0.6;
                                 }
                             }
                             if (routes_visited_tiles.includes(tile_id)) {
@@ -287,9 +347,35 @@ $(document).ready(function(){
         var sessionId = false;
         var state = false;
 
+        // Keep in sync with OR_TOOLS_TILE_THRESHOLD in tilesrouter.py - no
+        // shared source of truth between Python/JS in this codebase, so
+        // this has to be updated by hand if the server-side value changes.
+        var OR_TOOLS_TILE_THRESHOLD = 15;
+        var currentEstimateSeconds = null;
+
         function updateProgressBar(pct) {
             pct = Math.max(0, Math.min(100, pct || 0));
             $('#routeProgressBar').css('width', pct + '%').attr('aria-valuenow', pct);
+        }
+
+        function formatEstimate(seconds) {
+            if (seconds === null || seconds === undefined) return '';
+            if (seconds < 60) return ' ' + $.i18n('msg-estimate-seconds', Math.round(seconds));
+            return ' ' + $.i18n('msg-estimate-minutes', (seconds / 60).toFixed(1));
+        }
+
+        function fetchRouteTimeEstimate(solver, paramValue, callback) {
+            $.ajax({
+                type: 'GET',
+                url: 'estimate_route_time',
+                data: { solver: solver, param: paramValue },
+                success: function (data) {
+                    callback(data.status === 'OK' ? data.estimatedSeconds : null);
+                },
+                error: function () {
+                    callback(null);
+                }
+            });
         }
 
         function setMessageAlert(level) {
@@ -307,7 +393,8 @@ $(document).ready(function(){
                     if (data['status']=="OK") {
                         state = data['state']
                         updateProgressBar(data['progress']);
-                        $("#message").text($.i18n("message-state-"+data['state']));
+                        $("#message").text($.i18n("message-state-"+data['state'])
+                            + (data['state'] === 'searching' ? formatEstimate(currentEstimateSeconds) : ''));
                         if ('route' in data) {
                             routeId = data['findRouteId']
                             if (!routePolyline) {
@@ -365,10 +452,7 @@ $(document).ready(function(){
                         if (data['error_code'] == 1 && error_tiles.length > 0) {
                             let tileId = error_tiles[0];
                             if (!gravel_tiles.includes(tileId)) {
-                                $('#gravelModalText').text(
-                                    "Kachel " + tileId + " hat keine für den gewählten Modus " +
-                                    "befahrbare Straße. Wie möchtest du fortfahren?"
-                                );
+                                $('#gravelModalText').text($.i18n('msg-gravel-modal-text', tileId));
                                 $('#gravelModal').data('tileId', tileId);
                                 $('#gravelModal').modal('show');
                             }
@@ -386,7 +470,7 @@ $(document).ready(function(){
             tilesLayerGroup.clearLayers();
             updateMapTiles();
             $('#gravelModal').modal('hide');
-            request_route();
+            planRoute();
         });
 
         $('#gravelModalRemove').on('click', function() {
@@ -402,7 +486,7 @@ $(document).ready(function(){
                 }
             }
             $('#gravelModal').modal('hide');
-            request_route();
+            planRoute();
         });
 
         $('#gravelModalCancel').on('click', function() {
@@ -529,12 +613,33 @@ $(document).ready(function(){
             let budgetMode = $('input[name="routingMode"]:checked').val() === 'budget';
             $('#budgetModeControls').toggle(budgetMode);
             $('#manualModeControls').toggle(!budgetMode);
+            if (budgetMode) {
+                // Tiles picked in manual mode are irrelevant for a
+                // budget/orienteering search (which picks its own tiles) -
+                // leaving them selected would just misleadingly keep them
+                // highlighted on the map.
+                selected_tiles = [];
+                gravel_tiles = [];
+                localStorage.setItem("selected_tiles", JSON.stringify(selected_tiles));
+                updateSelectedTileCount();
+                displayed_tiles.clear();
+                tilesLayerGroup.clearLayers();
+                updateMapTiles();
+            }
         });
 
-        $('#bPlanRoute').on("click", function(e) {
-            e.preventDefault();
+        // Named (not an inline click handler) so the gravel modal's
+        // Accept/Remove buttons can trigger a real re-search too - they
+        // used to call request_route(), which was later turned into a
+        // no-op everywhere else in the GUI redesign (auto-search-on-every-
+        // change was intentionally removed), silently breaking their retry:
+        // clicking "Accept" updated gravel_tiles but never actually
+        // re-ran the search, leaving the previous failure message on
+        // screen until the user clicked "Route planen" again themselves.
+        function planRoute(e) {
+            if (e) e.preventDefault();
             if (!('start' in markers)) {
-                alert("Bitte zuerst einen Startpunkt setzen.");
+                alert($.i18n('msg-need-start-point'));
                 return;
             }
             set_planning_buttons(true);
@@ -546,16 +651,35 @@ $(document).ready(function(){
             $("#length").text("");
             $("#spinner-searching").show();
             updateProgressBar(0);
+            currentEstimateSeconds = null;
 
             if ($('input[name="routingMode"]:checked').val() === 'budget') {
-                let data = {
+                // A real road route can only ever be longer than the
+                // straight-line distance between start and end - if that
+                // alone already exceeds the budget, no search can possibly
+                // succeed. Catch this early with a clear explanation
+                // instead of letting the (potentially slow) search run and
+                // fail with a generic error.
+                if ('end' in markers) {
+                    let straightLineKm = mymap.distance(markers['start'].getLatLng(), markers['end'].getLatLng()) / 1000;
+                    let budgetKm = parseFloat($('#budgetKm').val());
+                    if (straightLineKm > budgetKm) {
+                        setMessageAlert('danger');
+                        $("#message").text($.i18n('msg-infeasible-budget', straightLineKm.toFixed(1), budgetKm.toFixed(1)));
+                        $("#spinner-searching").hide();
+                        set_planning_buttons(false);
+                        return;
+                    }
+                }
+                fetchRouteTimeEstimate('orienteering', parseFloat($('#budgetKm').val()), function (est) {
+                    currentEstimateSeconds = est;
+                });
+                let data = $.extend({
                     'sessionId': sessionId,
                     'start': latlonToQuery(markers['start'].getLatLng()),
                     'budgetKm': $('#budgetKm').val(),
                     'mode': $('#mode-selection').find(':selected').data('value'),
-                    'url': $("#statshunters_url").val(),
-                    'filter': $("#statshunters_filter").val()
-                };
+                }, getStatshuntersParams(), getActivityFilterParams());
                 $.getJSON({
                     url: 'start_orienteering',
                     data: data,
@@ -571,9 +695,16 @@ $(document).ready(function(){
                     }
                 });
             } else {
+                let tileCount = selected_tiles.length + waypoints.length;
+                let solverName = tileCount > OR_TOOLS_TILE_THRESHOLD ? 'ortools' : 'exact';
+                fetchRouteTimeEstimate(solverName, tileCount, function (est) {
+                    currentEstimateSeconds = est;
+                });
                 start_route(++active_timeout);
             }
-        });
+        }
+
+        $('#bPlanRoute').on("click", planRoute);
 
         $('#bAbortRoute').on("click", function(e) {
             e.preventDefault();
@@ -587,7 +718,7 @@ $(document).ready(function(){
                 success: function () {
                     $("#spinner-searching").hide();
                     setMessageAlert('info');
-                    $("#message").text("Abgebrochen");
+                    $("#message").text($.i18n('msg-aborted'));
                     updateProgressBar(0);
                     set_planning_buttons(false);
                 }
@@ -598,12 +729,41 @@ $(document).ready(function(){
 
             var maxSquareLayer = false;
             var clusterLayer = false;
+            // Set by the "Load demo data" button - routes every
+            // statshunters/scoring/orienteering request to the bundled
+            // sample dataset (demo=1) instead of a real share link, so the
+            // app can be tried without a Statshunters account. See
+            // route-tiles-server.py's _activities_folder().
+            var demoMode = false;
+
+            function isValidStatshuntersUrl(url) {
+                // Accepts the plain sharelink as well as variants with extra
+                // path segments (e.g. .../share/abcdef123456/activities, as
+                // seen when copying the link from the activities view) - the
+                // server already normalizes those (see statshunters.py,
+                // _normalize_share_url()); this is just an early, friendly
+                // rejection of clearly-wrong input before hitting the server.
+                return /^https?:\/\/(www\.)?statshunters\.com\/share\/[A-Za-z0-9]+(\/.*)?$/i.test(url.trim());
+            }
+
+            function getStatshuntersParams() {
+                return demoMode ? {demo: 1} : {url: $("#statshunters_url").val()};
+            }
 
             function statshunters_request(request) {
+                if (!demoMode) {
+                    let url = $("#statshunters_url").val();
+                    if (!isValidStatshuntersUrl(url)) {
+                        setStatshuntersStatus('error',
+                            $.i18n('msg-statshunters-invalid-url', 'https://statshunters.com/share/abcdef123456/'));
+                        return;
+                    }
+                }
+                setStatshuntersStatus('loading', $.i18n('msg-statshunters-loading'));
                 $.ajax({
                     type: 'GET',
                     url: request,
-                    data: {url: $("#statshunters_url").val(), filter:$("#statshunters_filter").val()},
+                    data: $.extend(getStatshuntersParams(), getActivityFilterParams()),
                     success: function ( data ) {
                         if (data.status=="OK") {
                             if (maxSquareLayer) {
@@ -618,27 +778,49 @@ $(document).ready(function(){
                             displayed_tiles.clear();
                             tilesLayerGroup.clearLayers();
                             updateMapTiles();
-                            clusterLayer = omnivore.kml.parse(data.cluster)
-                            clusterLayer.setStyle({
-                                color: '#20ff2080',
-                                weight: 3
-                            });
-                            if ($('#showCluster').is(":checked")) {
-                                clusterLayer.addTo(mymap)
+                            // compute_cluster()/compute_max_square() (statshunters.py) return
+                            // the plain int 0 instead of KML when there is no qualifying
+                            // cluster/square for the current (possibly filtered) tile set -
+                            // e.g. a narrow activity-type filter with too few tiles to have
+                            // any fully-surrounded "interior" tile. omnivore.kml.parse() has
+                            // no graceful failure mode for that, so it must never be called
+                            // with anything but an actual KML string.
+                            if (data.cluster) {
+                                clusterLayer = omnivore.kml.parse(data.cluster)
+                                clusterLayer.setStyle({
+                                    // Solid, fully opaque orange - the
+                                    // previous green (#20ff2080, half
+                                    // transparent) was nearly indistinguishable
+                                    // from the visited-tiles fill color
+                                    // (also green), which is exactly what
+                                    // this outline traces the edge of.
+                                    color: '#FF8C00',
+                                    weight: 4
+                                });
+                                if ($('#showCluster').is(":checked")) {
+                                    clusterLayer.addTo(mymap)
+                                }
                             }
-                            maxSquareLayer = omnivore.kml.parse(data.maxSquare)
-                            maxSquareLayer.setStyle({
-                                color: '#2020FF80',
-                                weight: 3
-                            });
-                            if ($('#showMaxSquare').is(":checked")) {
-                                maxSquareLayer.addTo(mymap)
+                            if (data.maxSquare) {
+                                maxSquareLayer = omnivore.kml.parse(data.maxSquare)
+                                maxSquareLayer.setStyle({
+                                    color: '#2020FF80',
+                                    weight: 3
+                                });
+                                if ($('#showMaxSquare').is(":checked")) {
+                                    maxSquareLayer.addTo(mymap)
+                                }
                             }
+                            populateActivityFilterOptions(data.filterOptions);
+                            setStatshuntersStatus('ok', $.i18n('msg-statshunters-loaded', data.tiles.length, new Date().toLocaleTimeString()));
                             load_tile_scores();
                         }
                         else {
-                            alert(data.message);
+                            setStatshuntersStatus('error', data.message || $.i18n('msg-statshunters-unknown-error'));
                         }
+                    },
+                    error: function ( jqXHR ) {
+                        setStatshuntersStatus('error', $.i18n('msg-statshunters-server-error', jqXHR.status));
                     }
                 });
             }
@@ -647,20 +829,15 @@ $(document).ready(function(){
                 $.ajax({
                     type: 'GET',
                     url: 'scoring',
-                    data: {url: $("#statshunters_url").val(), filter:$("#statshunters_filter").val()},
+                    data: $.extend(getStatshuntersParams(), getActivityFilterParams()),
                     success: function ( data ) {
                         if (data.status=="OK") {
                             maxSquareCompletionInfo = data.maxSquareCompletion;
                             maxSquareCompletionTiles = data.maxSquareCompletion.tiles;
-                            clusterScores = data.clusterScores;
-                            clusterScoresMax = Math.max(1, ...Object.values(clusterScores));
                             if (maxSquareCompletionInfo.missingCount > 0) {
-                                $('#maxSquareCompletionInfo').text(
-                                    maxSquareCompletionInfo.missingCount + ' tiles needed for a '
-                                    + maxSquareCompletionInfo.size + 'x' + maxSquareCompletionInfo.size
-                                    + ' square (current: ' + (maxSquareCompletionInfo.size - maxSquareCompletionInfo.gain) + 'x'
-                                    + (maxSquareCompletionInfo.size - maxSquareCompletionInfo.gain) + ')'
-                                );
+                                let currentSize = maxSquareCompletionInfo.size - maxSquareCompletionInfo.gain;
+                                $('#maxSquareCompletionInfo').text($.i18n('msg-tiles-needed-square',
+                                    maxSquareCompletionInfo.missingCount, maxSquareCompletionInfo.size, currentSize));
                             } else {
                                 $('#maxSquareCompletionInfo').text('');
                             }
@@ -671,12 +848,6 @@ $(document).ready(function(){
                     }
                 });
             }
-
-            $('#tileScoreMode').on("change", function(e) {
-                displayed_tiles.clear();
-                tilesLayerGroup.clearLayers();
-                updateMapTiles();
-            });
 
             $('#showVisitedTiles').on("change", function(e) {
                 displayed_tiles.clear();
@@ -689,28 +860,7 @@ $(document).ready(function(){
                 e.preventDefault();
             });
 
-            $("#statshunters_filter").on("change",  function ( e ) {
-                statshunters_request('statshunters_filter');
-                e.preventDefault();
-            });
-
-            {
-                /*let statshunters_filter = localStorage.getItem("statshunters_filter")
-                if (statshunters_filter) {
-                    $("#statshunters_filter").val(statshunters_filter);
-                }
-                let statshunters_url = localStorage.getItem("statshunters_url")
-                if (statshunters_url) {
-                    $("#statshunters_url").val(statshunters_url);
-
-                }*/
-                if ($("#statshunters_url").val()!="") {
-                    statshunters_request('statshunters_filter');
-                }
-            }
-            $("#bImportStatsHuntersReset").click(function() {
-                localStorage.removeItem("statshunters_filter");
-                localStorage.removeItem("statshunters_url");
+            function clearStatshuntersData() {
                 if (maxSquareLayer) {
                     maxSquareLayer.remove();
                     maxSquareLayer = false;
@@ -719,12 +869,55 @@ $(document).ready(function(){
                     clusterLayer.remove()
                     clusterLayer = false;
                 }
-                $("#statshunters_filter").val("");
-                $("#statshunters_url").val("");
+                $("#statshunters_filter_types").empty().append($('<option>').val('').text($.i18n('msg-activity-type-all')));
+                $('#statshuntersStatus').hide();
+                maxSquareCompletionTiles = [];
+                $('#maxSquareCompletionInfo').text('');
                 visited_tiles = [];
                 displayed_tiles.clear();
                 tilesLayerGroup.clearLayers();
                 updateMapTiles();
+            }
+
+            // Demo-mode toggle (top of the page, next to the language
+            // switcher) - a real on/off switch rather than a one-shot
+            // button, since flipping it back off should cleanly restore
+            // whatever real statshunters link was configured before.
+            function setDemoMode(enabled) {
+                demoMode = enabled;
+                $("#statshunters_url").prop('disabled', enabled);
+                $('button#bImportStatsHunters').prop('disabled', enabled);
+                if (enabled) {
+                    $("#statshunters_url").val("");
+                    statshunters_request('statshunters');
+                } else {
+                    $("#statshunters_url").val(localStorage.getItem("statshunters_url") || "");
+                    clearStatshuntersData();
+                }
+            }
+
+            $('#bDemoModeToggle').on('change', function () {
+                setDemoMode(this.checked);
+            });
+
+            $("#statshunters_filter_types").on("change",  function ( e ) {
+                statshunters_request('statshunters_filter');
+                e.preventDefault();
+            });
+
+            if ($("#statshunters_url").val()!="") {
+                statshunters_request('statshunters_filter');
+            }
+            $("#bImportStatsHuntersReset").click(function() {
+                localStorage.removeItem("statshunters_url");
+                if (demoMode) {
+                    $('#bDemoModeToggle').prop('checked', false);
+                }
+                demoMode = false;
+                $("#statshunters_url").prop('disabled', false);
+                $('button#bImportStatsHunters').prop('disabled', false);
+                $("#statshunters_url").val("");
+                clearStatshuntersData();
             });
 
             $('#showCluster').on("change", function(e) {
@@ -786,23 +979,6 @@ $(document).ready(function(){
             selectLoc = "waypoint";
         });
 
-        $("button#bClearStart").on("click", function(e) {
-            selectLoc = false;
-            if ("start" in markers) {
-                markers["start"].remove();
-                delete markers["start"];
-                localStorage.removeItem("start");
-            }
-        });
-        $("button#bClearEnd").on("click", function(e) {
-            selectLoc = false;
-            if ("end" in markers) {
-                markers["end"].remove();
-                delete markers["end"];
-                localStorage.removeItem("end");
-                request_route();
-            }
-        });
         $("button#clear-tiles").on("click", function(e) {
             selected_tiles = [];
             gravel_tiles = [];
@@ -822,7 +998,7 @@ $(document).ready(function(){
         $("#gpxMessage").hide();
 
         $("#button-download-route").on("click", function(e) {
-           file_name = prompt("File name", "")
+           file_name = prompt($.i18n("msg-download-filename"), "")
            if (file_name!=null) {
                $("#gpxMessage").hide();
                $.getJSON({
@@ -851,40 +1027,46 @@ $(document).ready(function(){
             latlng = markers["end"].getLatLng();
             localStorage.setItem("end", latlng.lat+","+latlng.lng);
             request_route();
-            update_circle();
         });
 
-        var circle_layer = false;
-
-        function update_circle() {
-            if (circle_layer) {
-                if (($('#is-draw-circle').is(":checked")) && ("start" in markers) && (!isNaN(parseInt($('#circle-size')))))
-                {
-                    circle_layer.setRadius(1000*parseInt($('#circle-size').val()));
-                    circle_layer.setLatLng(markers["start"].getLatLng());
-                } else {
-                    circle_layer.remove();
-                    circle_layer = false;
-
-                }
-            } else if (($('#is-draw-circle').is(":checked")) && ("start" in markers) && (!isNaN(parseInt($('#circle-size'))))) {
-                circle_layer = L.circle(markers["start"].getLatLng(), {radius: 1000*parseInt($('#circle-size').val()), fill: false}).addTo(mymap);
-            }
+        function updateMarkerButtonStates() {
+            let hasStart = 'start' in markers;
+            let hasEnd = 'end' in markers;
+            $('#bStart').toggleClass('marker-set', hasStart);
+            $('#bStartBadge').text(hasStart ? ' ✓' : '');
+            $('#bEnd').toggleClass('marker-set', hasEnd);
+            $('#bEndBadge').text(hasEnd ? ' ✓' : '');
+            $('#bEndRoundtripHint').toggle(!hasEnd);
         }
 
-        $('#is-draw-circle,#circle-size').on("change", function() {
-            update_circle();
-        })
+        function remove_marker(name) {
+            if (name in markers) {
+                markers[name].remove();
+                delete markers[name];
+                localStorage.removeItem(name);
+                updateMarkerButtonStates();
+                request_route();
+            }
+        }
 
         function add_marker(name, latlng) {
             if ((name in markers) && markers[name]) {
                 markers[name].setLatLng(latlng);
             } else {
+                // Clicking an existing Start/End marker removes it, same as
+                // a waypoint marker (add_waypoint()) - no separate "clear"
+                // button needed, consistent behaviour for all three marker
+                // types. Leaflet's Draggable suppresses the synthetic click
+                // event that would otherwise follow a drag's mouseup, so a
+                // real drag-to-move never triggers this.
                 markers[name] =  L.marker(latlng, {draggable: true, title: name, icon: markersIcons[name]}).addTo(mymap).on("dragend", function(e){
                     localStorage.setItem(this.options.title, this.getLatLng().lat+","+this.getLatLng().lng);
                     request_route();
+                }).on("click", function(e) {
+                    remove_marker(name);
                 });
             }
+            updateMarkerButtonStates();
         }
 
         function store_waypoints() {
@@ -921,7 +1103,6 @@ $(document).ready(function(){
                 add_waypoint(e.latlng);
             } else {
                 add_marker(selectLoc, e.latlng);
-                update_circle();
                 localStorage.setItem(selectLoc, e.latlng.lat+","+e.latlng.lng);
             }
             selectLoc = false;
@@ -938,7 +1119,6 @@ $(document).ready(function(){
             }
             load_marker("start");
             load_marker("end");
-            update_circle();
 
             try {
                 selected_tiles = JSON.parse(localStorage.getItem("selected_tiles")) || []
@@ -1265,7 +1445,7 @@ $(document).ready(function(){
 
             $('#rename-trace').on('click', function(e) {
                 let name = $('div#traces-list>.active>span:first').text();
-                let new_name = prompt("Nom", name);
+                let new_name = prompt($.i18n("msg-rename-prompt-label"), name);
                 if (new_name != null) {
                     $('div#traces-list>.active>span:first').text(new_name);
                     traces[$('div#traces-list>.active').index()].name = new_name;

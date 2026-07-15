@@ -1,5 +1,5 @@
 shapely
-fastkml<1.0
+fastkml>=1.0
 gpxpy
 numpy
 markdown

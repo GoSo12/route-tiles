@@ -6,7 +6,6 @@ Datastore, so that is exactly what this class reproduces:
 
 - .rnodes[node_id] -> (lat, lon)                       (read AND written directly by tile.py)
 - .routing[node_id][neighbor_id] -> weight              (read AND written directly by tile.py)
-- .not_update_routing[node_id] -> [neighbor_id, ...]     (bookkeeping dict, used by tile.py)
 - .forbiddenMoves / .mandatoryMoves                      (turn restrictions - see limitation below)
 - .node_lat_lon(node_id)
 - .find_node(lat, lon)
@@ -65,7 +64,6 @@ class OsmnxDatastore:
 
         self.routing = {}
         self.rnodes = {}
-        self.not_update_routing = {}
         self.forbiddenMoves = {}
         self.mandatoryMoves = {}
         # (u, v) -> [(lat, lon), ...] real curve points between the two nodes,
@@ -77,6 +75,22 @@ class OsmnxDatastore:
         # true geometry, in meters) - straight endpoint-to-endpoint distance
         # would underestimate curvy roads and could skew route selection.
         self.edge_lengths = {}
+
+        # tile_id -> Tile, already processed (get_entry_points() already
+        # called). Lives here, not on the per-search MyRouter/OrienteeringRunner
+        # instance, so it survives across repeated searches within the same
+        # session (e.g. the user adjusts the end point/waypoints and
+        # re-searches with the same tile selection) - exactly as long as
+        # self.routing/self.rnodes themselves do, since a cached Tile's
+        # entry-point node ids only make sense against this specific graph.
+        # Without this, a second search would build fresh Tile objects and
+        # call get_entry_points() again on an already-split graph, handing
+        # out synthetic node ids (tile uid + a counter starting over at 0)
+        # that collide with ones already in use for different physical
+        # points - silently corrupting edge_lengths/edge_shapes for
+        # whichever location the id was first assigned to (the "wilde
+        # Sprünge" bug, confirmed to recur through exactly this path).
+        self.tile_cache = {}
 
         self._graph = nx.MultiDiGraph()
         self._loaded_cells = set()
@@ -125,9 +139,56 @@ class OsmnxDatastore:
     def get_area_rect(self, lat1, lon1, lat2, lon2):
         self._ensure_region(lat1, lon1, lat2, lon2)
 
+    def _is_routable(self, node):
+        return any(w > 0 for w in self.routing.get(node, {}).values())
+
     def find_node(self, lat, lon):
+        """Nearest node to (lat, lon) that's actually routable under the
+        current mode - not just the geometrically nearest node in the raw
+        graph, which can land on a node only reachable via a road type
+        this mode's weight table excludes (e.g. a building-entrance node
+        linked only by a footway, while routing in "roadcycle" mode).
+
+        Found via a real reproduction: such a node has an empty entry in
+        self.routing (degree 0 in the routing graph). Handed to the
+        OR-Tools solver as a start/end/landmark node, it silently poisons
+        the distance matrix (every pair involving it is "unreachable",
+        which ortools_router.py only penalizes heavily instead of
+        forbidding outright - see UNREACHABLE_PENALTY_M) - manifesting as
+        either a crash ("No path between ...") when OR-Tools is forced to
+        use it, or a nonsensical straight-line "shortcut" in the rendered
+        route when it isn't. Searching outward for the nearest *routable*
+        node instead fixes this at the source, the same way
+        allow_gravel_near() already searches outward for gravel tiles.
+        """
         self.get_area(lat, lon)
-        return int(ox.distance.nearest_nodes(self._graph, lon, lat))
+        node = int(ox.distance.nearest_nodes(self._graph, lon, lat))
+        if self._is_routable(node):
+            return node
+
+        for radius_km in (0.15, 0.3, 0.6, 1.2, 2.5, 5.0):
+            margin_deg = radius_km / 111.0
+            self.get_area_rect(lat - margin_deg, lon - margin_deg,
+                                lat + margin_deg, lon + margin_deg)
+            best, best_dist = None, None
+            for n, (n_lat, n_lon) in self.rnodes.items():
+                if abs(n_lat - lat) > margin_deg or abs(n_lon - lon) > margin_deg:
+                    continue
+                if not self._is_routable(n):
+                    continue
+                d = distance((n_lat, n_lon), (lat, lon))
+                if d > radius_km:
+                    continue
+                if best is None or d < best_dist:
+                    best, best_dist = n, d
+            if best is not None:
+                return best
+
+        # Nothing routable within 5km - fall back to the original
+        # (unroutable) node so callers see the same failure they always
+        # would have (e.g. ERR_NO_TILE_ENTRY_POINT downstream), rather than
+        # a new exception raised from inside find_node() itself.
+        return node
 
     def _highway_of(self, data):
         highway = data.get("highway", "")

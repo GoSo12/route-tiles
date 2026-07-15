@@ -7,3 +7,6 @@ venv/
 cache/
 .DS_Store
 Vergangenheit.rtf
+route_timing_history.json
+.pytest_cache/
+__pycache__/

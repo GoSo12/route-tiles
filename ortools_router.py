@@ -18,7 +18,6 @@ import time
 import networkx as nx
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 
-from tile import Tile
 from tilesrouter import segment_distance
 from utils import distance
 
@@ -42,10 +41,26 @@ def _cost_graph(datastore):
     g = nx.Graph()
     g.add_nodes_from(datastore.rnodes.keys())
     for u, neighbors in datastore.routing.items():
+        u_latlon = datastore.rnodes.get(u)
         for v, weight in neighbors.items():
             if weight <= 0:
                 continue
-            cost = segment_distance(datastore, u, v) / weight
+            real_dist = segment_distance(datastore, u, v)
+            v_latlon = datastore.rnodes.get(v)
+            if u_latlon and v_latlon:
+                # No real road can be shorter than the straight line between
+                # its endpoints (mod float/geometry slack) - flooring here
+                # catches a corrupted edge_length regardless of how it got
+                # corrupted, e.g. a synthetic entry-node id silently reused
+                # for two different physical points (see
+                # _tile_representative_node), before the solver can pick
+                # such a hop as an unrealistically cheap "shortcut". This is
+                # the concrete mechanism behind the straight-line "wilde
+                # Sprünge" jumps: a real ~1.6km gap once registered at ~21m.
+                straight_km = distance(u_latlon, v_latlon)
+                if real_dist < straight_km * 0.9:
+                    real_dist = straight_km
+            cost = real_dist / weight
             if g.has_edge(u, v):
                 g[u][v]["cost"] = min(g[u][v]["cost"], cost)
             else:
@@ -53,21 +68,28 @@ def _cost_graph(datastore):
     return g
 
 
-def _tile_representative_node(datastore, tile_id):
-    """One real, routable point per tile - reuses the existing (proven)
-    entry-point detection instead of a naive nearest-node lookup, which can
-    land on a node with no valid edges for the current mode (e.g. only
-    reachable via a road type this mode's weight table excludes).
+def _tile_representative_node(tile):
+    """One real, routable point for an already-processed tile.
 
-    Callers (MyRouter._run) already validate every tile has at least one
-    entry point - with gravel relaxation applied first for tiles the user
-    opted into - before ever reaching this solver, so entryNodeId is
-    guaranteed non-empty here. No silent fallback to an unroutable nearest
-    node: if this ever fires, something upstream skipped that check and
-    should fail loudly rather than produce a bad route.
+    tile.get_entry_points() must already have been called by the caller,
+    on this exact Tile instance, before this is invoked. It must NOT be
+    (re-)called here: Tile.get_entry_points() only guards against running
+    twice on the *same instance* (it early-returns once self.entryNodeId is
+    set) - it does nothing to stop a second, independent Tile instance for
+    the same tile-id from re-scanning router.routing and finding a
+    *different* set of boundary crossings, because the first call has
+    already spliced synthetic nodes into that same shared routing dict.
+    The synthetic node-id scheme (tile uid + a counter local to that one
+    call) then reuses the same ids for these different physical points,
+    silently overwriting one location's edge_lengths/edge_shapes with
+    another's. That is the exact, confirmed mechanism behind the "wilde
+    Sprünge" bug (a real ~1.6km hop ending up registered at ~21m): this
+    function used to build its own throwaway Tile and call
+    get_entry_points() again, redundantly, after MyRouter._run() (or
+    plan_orienteering_route) had already done it properly. Every caller
+    must now compute entry points exactly once per tile per search and
+    pass the resulting Tile in here.
     """
-    tile = Tile(tile_id)
-    tile.get_entry_points(datastore)
     return min(tile.entryNodeId, key=lambda c: distance(c.latlon, (tile.lat, tile.lon))).nodeId
 
 
@@ -106,9 +128,13 @@ def _two_opt(order, matrix, time_limit_s=20):
     return order
 
 
-def solve_tile_route(datastore, start_node, end_node, tile_ids, waypoint_nodes=None, time_limit_s=30):
+def solve_tile_route(datastore, start_node, end_node, tiles, waypoint_nodes=None, time_limit_s=30):
     """Find a route visiting one representative point per tile (plus any
     mandatory waypoint nodes), starting at start_node and ending at end_node.
+
+    tiles: already-processed Tile objects (tile.get_entry_points(datastore)
+    already called by the caller - see _tile_representative_node for why
+    this function must not do that itself).
 
     Returns (status, node_path) in the same shape as
     tilesrouter.MyRouter.do_route_with_crossing_zone:
@@ -117,10 +143,32 @@ def solve_tile_route(datastore, start_node, end_node, tile_ids, waypoint_nodes=N
     landmarks = (
         [start_node, end_node]
         + list(waypoint_nodes or [])
-        + [_tile_representative_node(datastore, t) for t in tile_ids]
+        + [_tile_representative_node(t) for t in tiles]
     )
     n = len(landmarks)
     cost_graph = _cost_graph(datastore)
+
+    # Every landmark is mandatory (no AddDisjunction below) - if even one of
+    # them sits in a different connected component than start_node, the
+    # tour is flat-out infeasible, not just expensive. Catching that here
+    # and failing cleanly avoids two bad outcomes downstream: OR-Tools
+    # still trying to use the UNREACHABLE_PENALTY_M fallback below (a
+    # large but *finite* cost, so a large/otherwise-bad problem can still
+    # pick it) and then crashing during path reconstruction ("No path
+    # between ..."), or - if the unreachable landmark happens to sit in a
+    # small pocket with a real but very long path back in - rendering as
+    # a nonsensical straight-line "shortcut" instead of a real detour.
+    # Found via a real reproduction: find_node() picking a start point
+    # whose nearest graph node had zero routing edges for the current
+    # mode (now fixed at the source in osmnx_datastore.find_node(), this
+    # check stays as defense in depth for any other way a landmark could
+    # end up disconnected, e.g. a tile only reachable via a genuinely
+    # isolated road fragment).
+    if start_node not in cost_graph:
+        return "no_route", []
+    reachable = nx.node_connected_component(cost_graph, start_node)
+    if any(lm not in reachable for lm in landmarks):
+        return "no_route", []
 
     matrix = [[0] * n for _ in range(n)]
     for i, src in enumerate(landmarks):
